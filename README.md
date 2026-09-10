@@ -59,6 +59,54 @@ the program you are writing.
   the terminal over and takes it back, which is a problem every TUI has and
   none of them has anywhere to put.
 
+## Every readline key, and what became of it
+
+The claim is "the readline keys people's fingers already know", so here is the
+whole emacs-mode binding set and what each one does here. **Not relevant** means
+the key is about something this is not - a shell's history, a full-screen
+program's screen, a region between a mark and the point.
+
+The two widgets do not bind the same set, and where they differ the cell says
+which. Everything a `TextArea` binds and a `LineInput` does not comes back as
+`:unhandled`, so it is the host's to use.
+
+| key | readline calls it | here |
+|---|---|---|
+| `^b` `^f` | backward-char, forward-char | ✅ and the arrows |
+| `^p` `^n` | previous-history, next-history | ✅ `TextArea` only, as previous-line / next-line, and so are `↑`/`↓`. A `LineInput` has no second line to reach and no history to walk, so all four come back |
+| `^a` `^e` | beginning-of-line, end-of-line | ✅ and Home / End |
+| `⌥b` `⌥f` | backward-word, forward-word | ✅ and ctrl-arrows |
+| `^d` | delete-char | ✅ and Delete. Not end-of-file on an empty buffer: escape is how you leave |
+| `⌫` | backward-delete-char | ✅ |
+| `^t` | transpose-chars | ✅ |
+| `⌥t` | transpose-words | ⬜ skipped - `^t` is muscle memory and this one is not |
+| `⌥u` `⌥l` `⌥c` | upcase-word, downcase-word, capitalize-word | ⬜ skipped - trivial to add if somebody wants them |
+| `^k` | kill-line | ✅ and it takes the line break when the tail is empty |
+| `^u` | unix-line-discard | ✅ back to the start of the line - readline's rule, not zsh's kill-whole-line |
+| `^w` | unix-word-rubout | ✅ delimited by whitespace |
+| `⌥⌫` | backward-kill-word | ✅ delimited by anything non-alphanumeric, which is the whole reason it is a second key |
+| `⌥d` | kill-word | ✅ |
+| `^y` | yank | ✅ one slot, and a *run* of kills is one yank |
+| `⌥y` | yank-pop | ⬜ skipped - the second entry of a kill ring is somebody using this as their editor. `killed` is a plain string, so a host can keep a ring and set it |
+| `^_` `^x^u` | undo | ⬜ skipped - `⌥e` opens `$EDITOR`, where undo, search and your own keymap already are. The biggest of the deliberate omissions, and the one to revisit first |
+| `^q` `^v` | quoted-insert | ⬜ skipped - it needs the host's decoder to hand over the next key undecoded, which is a contract this does not have yet |
+| `↵` `^j` | accept-line | ✅ splits the line in a `TextArea`; accepts in a `LineInput`, and an empty one is a `:cancel` rather than a submission of nothing |
+| `^s` | forward-search-history | ❌ not relevant - no history. `TextArea` binds it to submit instead, since the key that finishes a multi-line buffer cannot be `↵`; a `LineInput` leaves it alone. Note that it is XOFF under terminal flow control, so a host has to have cleared `IXON` for it to arrive at all |
+| `^r` | reverse-search-history | ❌ not relevant - no history, and nothing binds it, so it is free for a host |
+| `^g` | abort | ✅ same as escape |
+| `^l` | clear-screen | ❌ not relevant - the host draws the frame and owns the screen |
+| `^c` | (SIGINT, not a binding) | ❌ not relevant - the host owns the signal |
+| `⌥<` `⌥>` `⌥.` | history motion, yank-last-arg | ❌ not relevant - no history |
+| `^x^e` | edit-and-execute-command | ✅ `TextArea` only, as `⌥e` and `^o` - `⌥e` is what the Julia REPL binds to the same move. A one-line field has nothing worth opening an editor for |
+| `^@` `^x^x` `^w`-as-kill-region | set-mark, exchange-point-and-mark, kill-region | ❌ not relevant - there is no mark and no region |
+| `^]` `⌥^]` | character-search | ❌ not relevant |
+| `↹` | complete | ❌ not relevant - there is nothing here to complete against |
+| PgUp / PgDn | (not readline) | ⬜ skipped - paging needs to know how tall the box is, and `handle!` takes a key and no size |
+
+Two-key chords are the reason several of those are skipped rather than absent:
+nothing here holds state between keystrokes, so `^x`-anything would be the first
+thing to need it.
+
 ## What Term gives it
 
 The border is drawn with Term's box characters, following

@@ -161,16 +161,18 @@ displaycolumn(line::AbstractString, col::Int) =
 
 Hand one key code to the text area. See [`ACTIONS`](@ref) for what comes back.
 
-The keys, in the order they are tried: escape cancels, `^s` submits, `⌥e`/`^o`
-open `\$EDITOR`, `↵` splits the line, and the rest is readline - `^w` and
-alt-backspace by the two word rules, `^k`, `^u`, `^a`/`^e`, `^d`, the arrows,
-home and end. Anything else printable is inserted as the bytes it arrived as.
+The keys, in the order they are tried: escape and `^g` cancel, `^s` submits,
+`⌥e`/`^o` open `\$EDITOR`, `↵` splits the line, and the rest is readline - the
+kills (`^k`, `^u`, `^w`, `⌥⌫`, `⌥d`) and `^y` to put them back, `^t`, the
+motions (`^b`/`^f`/`^p`/`^n`, `^a`/`^e`, the arrows, home and end) and `^d`.
+Anything else printable is inserted as the bytes it arrived as. The README has
+the whole readline table, including what is deliberately not here.
 """
 function handle!(v::TextArea, k::Int)
     k = unshift(k)
     v.status = ""
     b = v.buf
-    if k == 27
+    if k == 27 || k == C_G
         return :cancel
     elseif k == C_S
         if isblank(b) && !v.allow_empty
@@ -194,6 +196,12 @@ function handle!(v::TextArea, k::Int)
         killtostart!(b)
     elseif k in (C_W, K_WORD_BACK)
         deleteword!(b; alnum = k == K_WORD_BACK)
+    elseif k == K_WORD_KILL
+        killwordforward!(b)
+    elseif k == C_Y
+        yank!(b)
+    elseif k == C_T
+        transpose!(b)
     elseif k == K_WORD_LEFT
         move!(b, :wordleft)
     elseif k == K_WORD_RIGHT
@@ -202,13 +210,13 @@ function handle!(v::TextArea, k::Int)
         move!(b, :home)
     elseif k in (C_E, K_END)
         move!(b, :end)
-    elseif k == K_LEFT
+    elseif k in (K_LEFT, C_B)
         move!(b, :left)
-    elseif k == K_RIGHT
+    elseif k in (K_RIGHT, C_F)
         move!(b, :right)
-    elseif k == K_UP
+    elseif k in (K_UP, C_P)
         move!(b, :up)
-    elseif k == K_DOWN
+    elseif k in (K_DOWN, C_N)
         move!(b, :down)
     elseif printable(k)
         insert!(b, keychar(k))

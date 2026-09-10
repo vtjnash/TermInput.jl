@@ -22,6 +22,8 @@ mutable struct TextBuffer
     lines::Vector{String}
     row::Int
     col::Int
+    killed::String       # what the last run of kills took, for `^y`
+    killing::Bool        # was the operation before this one a kill?
 end
 
 """
@@ -34,13 +36,15 @@ composer opened on an existing draft should start.
 through a web form, and a line ending in a carriage return draws as one
 character of rubbish at the end of every row.
 """
-TextBuffer(s::AbstractString = "") = (b = TextBuffer([""], 1, 1); settext!(b, s); b)
+TextBuffer(s::AbstractString = "") =
+    (b = TextBuffer([""], 1, 1, "", false); settext!(b, s); b)
 
 """The whole buffer as one string, lines joined by newlines."""
 text(b::TextBuffer) = join(b.lines, "\n")
 
 """Replace everything, and put the cursor at the end."""
 function settext!(b::TextBuffer, s::AbstractString)
+    endkill!(b)
     ls = isempty(s) ? [""] : String.(split(replace(s, "\r\n" => "\n"), "\n"))
     b.lines = ls
     b.row = length(ls)
@@ -71,6 +75,35 @@ function clampcursor!(b::TextBuffer)
     b.col = clamp(b.col, 1, length(b.lines[b.row]) + 1)
     b
 end
+
+# --- the kill buffer --------------------------------------------------------
+#
+# One slot, not a ring. `^y` puts back what the last run of kills took, and
+# `⌥y` - which would step back through earlier ones - is not here: a text area
+# is a place to write a paragraph, and the second entry of a kill ring is
+# somebody using it as their editor. `killed` is a plain string, so a host that
+# wants a ring can keep one and set it.
+
+"""Put `s` in the kill buffer.
+
+Joined to what is already there when the operation before this one was also a
+kill, which is what makes `^k^k^k` then `^y` give back three lines rather than
+the last one. A *backward* kill goes on the front, so that `^w^w` yanks back in
+the order it was typed rather than reversed.
+
+Every other operation clears [`killing`](@ref TextBuffer), which is what ends a
+run - so the accumulating is automatic for a caller driving the buffer directly
+and needs no bookkeeping in the widget.
+"""
+function kill!(b::TextBuffer, s::AbstractString; backward::Bool = false)
+    b.killed = !b.killing ? String(s) :
+               backward ? string(s, b.killed) : string(b.killed, s)
+    b.killing = true
+    b
+end
+
+"""Anything that is not a kill ends the run the next one starts fresh from."""
+endkill!(b::TextBuffer) = (b.killing = false; b)
 
 # --- the two word rules -----------------------------------------------------
 
@@ -116,6 +149,7 @@ easy to leave out and then miss.
 """
 function move!(b::TextBuffer, where::Symbol)
     clampcursor!(b)
+    endkill!(b)
     l, n = curline(b), length(curline(b))
     if where === :left
         b.col > 1 ? (b.col -= 1) :
@@ -165,7 +199,7 @@ would recognise - see `Keys.K_BASE`. It is inserted as the bytes it is, because
 they are the bytes somebody typed or pasted.
 """
 function Base.insert!(b::TextBuffer, c::AbstractChar)
-    clampcursor!(b)
+    clampcursor!(b); endkill!(b)
     head, tail = split_at_cursor(b)
     b.lines[b.row] = string(head, c, tail)
     b.col += 1
@@ -174,7 +208,7 @@ end
 
 """Split the line at the cursor, leaving the cursor at the front of the new one."""
 function newline!(b::TextBuffer)
-    clampcursor!(b)
+    clampcursor!(b); endkill!(b)
     head, tail = split_at_cursor(b)
     b.lines[b.row] = head
     Base.insert!(b.lines, b.row + 1, tail)
@@ -193,7 +227,7 @@ the cursor ends up below the block rather than after it: text dropped into
 nothing is what you are about to write under, not into.
 """
 function insertblock!(b::TextBuffer, s::AbstractString)
-    clampcursor!(b)
+    clampcursor!(b); endkill!(b)
     ins = String.(split(replace(String(s), "\r\n" => "\n"), "\n"))
     if length(b.lines) == 1 && isempty(b.lines[1])
         b.lines = vcat(ins, [""])
@@ -225,7 +259,7 @@ end
 
 """Delete the character before the cursor, joining lines when there is none."""
 function backspace!(b::TextBuffer)
-    clampcursor!(b)
+    clampcursor!(b); endkill!(b)
     l = curline(b)
     if b.col > 1
         b.lines[b.row] = string(first(l, b.col - 2), l[nextind(l, 0, b.col):end])
@@ -239,7 +273,7 @@ end
 """Delete the character under the cursor, pulling the next line up when there is
 none - which is what makes `^d` at the end of a line the inverse of `↵`."""
 function deletechar!(b::TextBuffer)
-    clampcursor!(b)
+    clampcursor!(b); endkill!(b)
     l, n = curline(b), length(curline(b))
     if b.col <= n
         b.lines[b.row] = string(first(l, b.col - 1), l[nextind(l, 0, b.col + 1):end])
@@ -250,24 +284,35 @@ function deletechar!(b::TextBuffer)
     b
 end
 
-"""`^k`: everything from the cursor to the end of the line, or - on an empty
-tail - the line break itself."""
+"""`^k` (kill-line): everything from the cursor to the end of the line, or - on
+an empty tail - the line break itself, which is what makes `^k^k` take a whole
+line and its newline with it."""
 function killline!(b::TextBuffer)
     clampcursor!(b)
     l, n = curline(b), length(curline(b))
     if b.col <= n
+        kill!(b, l[nextind(l, 0, b.col):end])
         b.lines[b.row] = String(first(l, b.col - 1))
     elseif b.row < length(b.lines)
+        kill!(b, "\n")
         b.lines[b.row] = string(l, b.lines[b.row + 1])
         deleteat!(b.lines, b.row + 1)
     end
     b
 end
 
-"""`^u`: the whole line, leaving it empty."""
+"""`^u` (unix-line-discard): from the cursor back to the start of the line.
+
+Readline's rule, not zsh's - zsh binds `^u` to kill-whole-line, and the two only
+differ when the cursor is not at the end of the line, which is exactly when
+somebody meant one of them in particular.
+"""
 function killtostart!(b::TextBuffer)
     clampcursor!(b)
-    b.lines[b.row] = ""
+    l = curline(b)
+    b.col > 1 || return b
+    kill!(b, String(first(l, b.col - 1)); backward = true)
+    b.lines[b.row] = String(l[nextind(l, 0, b.col):end])
     b.col = 1
     b
 end
@@ -275,21 +320,98 @@ end
 """
     deleteword!(b; alnum = false) -> TextBuffer
 
-Delete the word before the cursor. `alnum` picks the rule - see
-[`word_start`](@ref) - and at column 1 there is no word behind the cursor on
-this line, so it joins upwards the way backspace does.
+`^w` (unix-word-rubout) and `⌥⌫` (backward-kill-word): the word before the
+cursor. `alnum` picks the rule - see [`word_start`](@ref) - and at column 1
+there is no word behind the cursor on this line, so the line break is what is
+killed and the lines join, the way backspace joins them.
 """
 function deleteword!(b::TextBuffer; alnum::Bool = false)
     clampcursor!(b)
     l = curline(b)
     ws = word_start(l, b.col; alnum = alnum)
     if ws < b.col
+        kill!(b, String(l[nextind(l, 0, ws):prevind(l, nextind(l, 0, b.col))]);
+              backward = true)
         b.lines[b.row] = string(first(l, ws - 1), l[nextind(l, 0, b.col):end])
         b.col = ws
         b
-    else
+    elseif b.row > 1
+        kill!(b, "\n"; backward = true)
         joinup!(b)
+    else
+        b
     end
+end
+
+"""
+    killwordforward!(b) -> TextBuffer
+
+`⌥d` (kill-word): from the cursor to the end of the word in front of it, by the
+alphanumeric rule - the mirror of `⌥⌫`, and the reason both exist is that the
+word behind you and the word in front of you are separately worth removing.
+"""
+function killwordforward!(b::TextBuffer)
+    clampcursor!(b)
+    l, n = curline(b), length(curline(b))
+    we = word_end(l, b.col; alnum = true)
+    if we > b.col && b.col <= n
+        kill!(b, String(l[nextind(l, 0, b.col):prevind(l, nextind(l, 0, we))]))
+        b.lines[b.row] = string(first(l, b.col - 1), l[nextind(l, 0, we):end])
+    elseif b.col > n && b.row < length(b.lines)
+        kill!(b, "\n")
+        b.lines[b.row] = string(l, b.lines[b.row + 1])
+        deleteat!(b.lines, b.row + 1)
+    end
+    b
+end
+
+"""
+    yank!(b) -> TextBuffer
+
+`^y`: put the last run of kills back at the cursor, which ends up after it.
+
+Several lines go in as several lines, since that is what `^k^k` took. There is
+no `⌥y` to step further back - see the note above the kill buffer.
+"""
+function yank!(b::TextBuffer)
+    clampcursor!(b)
+    isempty(b.killed) && return endkill!(b)
+    parts = split(b.killed, '\n')
+    head, tail = split_at_cursor(b)
+    if length(parts) == 1
+        b.lines[b.row] = string(head, parts[1], tail)
+        b.col += length(parts[1])
+    else
+        b.lines[b.row] = string(head, parts[1])
+        for (j, x) in enumerate(parts[2:end])
+            insert!(b.lines, b.row + j, String(x))
+        end
+        b.row += length(parts) - 1
+        b.col = length(last(parts)) + 1
+        b.lines[b.row] = string(b.lines[b.row], tail)
+    end
+    endkill!(b)
+end
+
+"""
+    transpose!(b) -> TextBuffer
+
+`^t`: drag the character before the cursor forward over the one under it, and
+the cursor with it. At the end of the line it swaps the last two instead, which
+is readline's rule and is the case people actually hit - the typo is behind you
+by the time you notice it.
+"""
+function transpose!(b::TextBuffer)
+    clampcursor!(b)
+    endkill!(b)
+    cs = collect(curline(b))
+    n = length(cs)
+    i = b.col > n ? n : b.col      # the character at the cursor, or the last one
+    (n < 2 || i < 2) && return b
+    cs[i - 1], cs[i] = cs[i], cs[i - 1]
+    b.lines[b.row] = String(cs)
+    b.col = min(i + 1, n + 1)
+    b
 end
 
 # --- where the cursor is on a wrapped screen --------------------------------

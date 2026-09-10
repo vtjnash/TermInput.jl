@@ -20,15 +20,17 @@ produces this vocabulary belongs here eventually; see the README.
 module Keys
 
 export K_BASE, K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP,
-       K_PGDN, K_STAB, K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_EDIT,
-       K_SUP, K_SDOWN, printable, keychar, keycode, unshift
-export C_A, C_D, C_E, C_K, C_O, C_R, C_S, C_U, C_W
+       K_PGDN, K_STAB, K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_WORD_KILL,
+       K_EDIT, K_SUP, K_SDOWN, printable, keychar, keycode, unshift
+export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
+       C_W, C_Y
 
 # Readline's editing keys, by the control bytes they arrive as. Named because a
 # `handle!` full of bare integers is a table nobody can read: `k == C_W` is the
 # key, `k == 23` is a number that happens to be it.
 const C_A, C_D, C_E, C_K, C_S, C_U, C_W, C_O = 1, 4, 5, 11, 19, 21, 23, 15
 const C_R = 18
+const C_B, C_F, C_G, C_N, C_P, C_T, C_Y = 2, 6, 7, 14, 16, 20, 25
 
 """Where the keys that are not characters start.
 
@@ -73,6 +75,7 @@ const K_WORD_LEFT  = K_BASE + 10
 const K_WORD_RIGHT = K_BASE + 11
 const K_WORD_BACK  = K_BASE + 12    # delete the word before the cursor
 const K_EDIT       = K_BASE + 13    # Alt-e, as the REPL binds it
+const K_WORD_KILL  = K_BASE + 16    # Alt-d: the word in front of the cursor
 const K_SUP        = K_BASE + 14    # Shift-Up and Shift-Down, which are the
 const K_SDOWN      = K_BASE + 15    # arrows' own keys and not modifiers here:
                                     # only the detail pane does anything with

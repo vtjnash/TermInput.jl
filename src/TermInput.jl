@@ -52,8 +52,8 @@ import InteractiveUtils
 
 export ESCAPE, awidth, astrip, afit, apad, amid, awrap
 export TextBuffer, settext!, curline, move!, newline!, insertblock!, backspace!,
-       deletechar!, killline!, killtostart!, deleteword!, word_start, word_end,
-       bufferrows, isblank
+       deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
+       kill!, yank!, transpose!, word_start, word_end, bufferrows, isblank
 export boxstyle, dialogbox, centred
 export suspend, compose_external, mouse_reporting
 export TextArea, LineInput, ACTIONS, submission, TEXTAREA_HINT, LINEINPUT_HINT
@@ -62,9 +62,10 @@ export TextArea, LineInput, ACTIONS, submission, TEXTAREA_HINT, LINEINPUT_HINT
 # keystroke has to be able to say `K_LEFT` without knowing where it lives.
 export Keys
 export K_BASE, K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP,
-       K_PGDN, K_STAB, K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_EDIT,
-       K_SUP, K_SDOWN, printable, keychar, keycode, unshift
-export C_A, C_D, C_E, C_K, C_O, C_R, C_S, C_U, C_W
+       K_PGDN, K_STAB, K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_WORD_KILL,
+       K_EDIT, K_SUP, K_SDOWN, printable, keychar, keycode, unshift
+export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
+       C_W, C_Y
 
 include("ansi.jl")
 include("keys.jl")

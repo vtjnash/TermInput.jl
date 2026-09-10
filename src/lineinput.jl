@@ -68,6 +68,11 @@ end
     handle!(v::LineInput, k) -> Symbol
 
 Hand one key code to the line input. See [`ACTIONS`](@ref) for what comes back.
+
+The same keys as [`TextArea`](@ref) less the ones that need a second line: `↵`
+accepts rather than splitting, and `^p`/`^n` are not bound at all. There is no
+history here for them to walk, which is what readline gives them, so they are
+handed back for a host that has one.
 """
 function handle!(v::LineInput, k::Int)
     k = unshift(k)
@@ -75,7 +80,7 @@ function handle!(v::LineInput, k::Int)
     b = v.buf
     if k in (13, 10)
         return isblank(b) ? :cancel : :submit
-    elseif k == 27
+    elseif k == 27 || k == C_G
         return :cancel
     elseif k in (127, 8)
         backspace!(b)
@@ -85,8 +90,14 @@ function handle!(v::LineInput, k::Int)
         killtostart!(b)
     elseif k in (C_W, K_WORD_BACK)
         deleteword!(b; alnum = k == K_WORD_BACK)
+    elseif k == K_WORD_KILL
+        killwordforward!(b)
     elseif k == C_K
         killline!(b)
+    elseif k == C_Y
+        yank!(b)
+    elseif k == C_T
+        transpose!(b)
     elseif k == K_WORD_LEFT
         move!(b, :wordleft)
     elseif k == K_WORD_RIGHT
@@ -95,9 +106,9 @@ function handle!(v::LineInput, k::Int)
         move!(b, :home)
     elseif k in (C_E, K_END)
         move!(b, :end)
-    elseif k == K_LEFT
+    elseif k in (K_LEFT, C_B)
         move!(b, :left)
-    elseif k == K_RIGHT
+    elseif k in (K_RIGHT, C_F)
         move!(b, :right)
     elseif printable(k)
         insert!(b, keychar(k))

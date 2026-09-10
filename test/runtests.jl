@@ -226,6 +226,90 @@ end
     @test h.col == 6
 end
 
+@testset "what is killed can be put back" begin
+    # One slot, not a ring, and a *run* of kills is one yank: `^k^k^k` then
+    # `^y` gives back three lines rather than the last one.
+    b = TextBuffer("one\ntwo\nthree")
+    b.row, b.col = 1, 1
+    killline!(b); killline!(b)          # the line, then the newline
+    killline!(b); killline!(b)
+    @test text(b) == "three"
+    @test b.killed == "one\ntwo\n"
+    move!(b, :end)
+    yank!(b)
+    @test text(b) == "threeone\ntwo\n"
+    @test (b.row, b.col) == (3, 1)      # the cursor ends after what went in
+
+    # Anything that is not a kill ends the run, so the next one starts fresh
+    # rather than joining onto something typed a minute ago.
+    c = TextBuffer("alpha beta")
+    deleteword!(c)
+    @test c.killed == "beta"
+    insert!(c, 'x')
+    deleteword!(c)
+    @test c.killed == "x"
+
+    # A backward kill goes on the *front*, so two of them yank back in the
+    # order they were typed rather than reversed.
+    d = TextBuffer("alpha beta gamma")
+    deleteword!(d); deleteword!(d)
+    @test d.killed == "beta gamma"
+    settext!(d, "")
+    yank!(d)
+    @test text(d) == "beta gamma"
+
+    # `^u` is readline's, not zsh's: from the cursor back to the start, which
+    # only differs from the whole line when the cursor is not at the end - and
+    # that is exactly when somebody meant one of them in particular.
+    e = TextBuffer("keep this")
+    e.col = 6
+    killtostart!(e)
+    @test text(e) == "this" && e.col == 1 && e.killed == "keep "
+    @test text(killtostart!(TextBuffer("x"))) == ""
+
+    # `⌥d` is the mirror of `⌥⌫`: the word in front of the cursor.
+    f = TextBuffer("alpha beta")
+    f.col = 1
+    killwordforward!(f)
+    @test text(f) == " beta" && f.killed == "alpha"
+    # At the end of a line it takes the line break, the way `^k` does.
+    g = TextBuffer("one\ntwo")
+    g.row, g.col = 1, 4
+    killwordforward!(g)
+    @test text(g) == "onetwo" && g.killed == "\n"
+
+    # Yanking nothing is not an insertion of nothing gone wrong.
+    h = TextBuffer("x")
+    yank!(h)
+    @test text(h) == "x"
+
+    # And what was killed survives being yanked, so it can go in twice.
+    i = TextBuffer("word")
+    deleteword!(i); yank!(i); yank!(i)
+    @test text(i) == "wordword" && i.killed == "word"
+end
+
+@testset "^t drags a character over the one in front of it" begin
+    b = TextBuffer("abc")
+    b.col = 2
+    transpose!(b)
+    @test text(b) == "bac" && b.col == 3
+    # At the end of the line it swaps the last two instead, which is the case
+    # people actually hit: the typo is behind you by the time you notice it.
+    c = TextBuffer("abc")
+    transpose!(c)
+    @test text(c) == "acb" && c.col == 4
+    # Nothing to drag over, and nothing thrown.
+    d = TextBuffer("abc"); d.col = 1
+    @test text(transpose!(d)) == "abc"
+    @test text(transpose!(TextBuffer("a"))) == "a"
+    @test text(transpose!(TextBuffer())) == ""
+    # Characters, not bytes.
+    e = TextBuffer("aé")
+    transpose!(e)
+    @test text(e) == "éa"
+end
+
 @testset "a block goes in whole, or splits the line" begin
     # An empty buffer takes it whole, with a line under it: text dropped into
     # nothing is what you are about to write *under*, not into.
@@ -353,6 +437,27 @@ end
     # Shift-arrows are the arrows here: there is no selection to extend.
     handle!(r, K_SDOWN)
     @test r.buf.row == 1
+
+    # The emacs motion keys are the arrows under another name, which is what
+    # readline binds them to and what a hand that never leaves the home row
+    # reaches for.
+    m = TextArea("t"; initial = "one\ntwo")
+    m.buf.row, m.buf.col = 1, 1
+    handle!(m, C_F); @test m.buf.col == 2
+    handle!(m, C_B); @test m.buf.col == 1
+    handle!(m, C_N); @test m.buf.row == 2
+    handle!(m, C_P); @test m.buf.row == 1
+
+    # A kill and a yank, through the keys.
+    y = TextArea("t"; initial = "alpha beta")
+    handle!(y, C_W)
+    @test text(y) == "alpha "
+    handle!(y, C_Y)
+    @test text(y) == "alpha beta"
+    handle!(y, C_T)
+    @test text(y) == "alpha beat"                # the last two, swapped
+    # `^g` is readline's abort, and means here what escape means.
+    @test handle!(y, C_G) === :cancel
 end
 
 @testset "the text area draws a frame of exactly the size asked for" begin
@@ -408,9 +513,19 @@ end
     @test handle!(p, 13) === :submit && submission(p) == "spaced"
     @test handle!(p, 27) === :cancel
     # There is no second line to reach, so the keys that would make one are the
-    # host's.
+    # host's - and `^p`/`^n`, which readline gives to the history, go back for a
+    # host that has one.
     @test handle!(p, K_UP) === :unhandled
     @test handle!(p, K_PGDN) === :unhandled
+    @test handle!(p, C_P) === :unhandled && handle!(p, C_N) === :unhandled
+    # The rest of the editing is the text area's, including the kill buffer.
+    p = LineInput("t")
+    for c in "alpha beta"; handle!(p, keycode(c)); end
+    handle!(p, C_W); handle!(p, C_Y)
+    @test text(p) == "alpha beta"
+    handle!(p, C_A); handle!(p, K_WORD_KILL)
+    @test text(p) == " beta"
+    @test handle!(p, C_G) === :cancel
 
     # A newline in a one-row field is not a character to draw: the frame is
     # clamped by element, so one element holding a newline prints as two rows,
@@ -421,6 +536,35 @@ end
     for (w, h) in ((90, 24), (80, 10), (40, 8), (160, 50))
         ls = split(render(p, w, h), "\n")
         @test length(ls) == h && all(awidth(l) == w for l in ls)
+    end
+end
+
+@testset "the two widgets differ in exactly four places" begin
+    # The README carries the whole readline table, and a table is only worth
+    # having if it cannot drift. Every key both widgets bind is written down
+    # once there; this is the list of the ones where they part, so a binding
+    # added to one and not the other fails here rather than in the table.
+    every = [C_B, C_F, C_P, C_N, C_A, C_E, K_WORD_LEFT, K_WORD_RIGHT, K_LEFT,
+             K_RIGHT, K_UP, K_DOWN, K_HOME, K_END, C_D, K_DEL, 127, C_T, C_K,
+             C_U, C_W, K_WORD_BACK, K_WORD_KILL, C_Y, C_G, 27, 13, 10, C_S, C_R,
+             K_EDIT, C_O, 12, 17, 22, 0, 9, K_STAB, K_PGUP, K_PGDN]
+    act(mk, k) = handle!(mk(), k)
+    ta() = TextArea("t"; initial = "ab cd")
+    li() = LineInput("t"; initial = "ab cd")
+    differ = [k for k in every if act(ta, k) !== act(li, k)]
+
+    # A second line to reach, a key that finishes a multi-line buffer, and an
+    # editor worth opening. Nothing else.
+    @test Set(differ) == Set([C_P, C_N, K_UP, K_DOWN, 13, 10, C_S, K_EDIT, C_O])
+    @test act(ta, C_S) === :submit && act(li, C_S) === :unhandled
+    @test act(ta, 13) === :ok && act(li, 13) === :submit
+    @test act(ta, K_EDIT) === :ok && act(li, K_EDIT) === :unhandled
+    @test act(ta, K_UP) === :ok && act(li, K_UP) === :unhandled
+
+    # And the keys neither of them claims, which are a host's to bind: the two
+    # search keys, quoted-insert, clear-screen, tab and the pages.
+    for k in (C_R, 12, 17, 22, 0, 9, K_STAB, K_PGUP, K_PGDN)
+        @test act(ta, k) === :unhandled && act(li, k) === :unhandled
     end
 end
 
