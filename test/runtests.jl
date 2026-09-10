@@ -703,4 +703,31 @@ end
     @test occursin("no change", n.status)
 end
 
+@testset "a widget that does not have the keyboard draws no cursor" begin
+    # A host that draws this beside something else has two things on screen and
+    # one of them has the keys. Two cursors would say neither does - so the
+    # widget takes it as a field rather than the host having to paint over the
+    # block afterwards, which is the only other way to get there from outside.
+    ta = TextArea("Comment", "on a.jl:11"; initial = "a remark")
+    @test ta.focused                                    # the only-thing-on-screen case
+    lit = render(ta, 60, 16)
+    @test occursin("\e[7m", lit)
+
+    ta.focused = false
+    dark = render(ta, 60, 16)
+    @test !occursin("\e[7m", dark)
+    # Only the cursor goes. Everything else is the same frame, at the same size,
+    # so a host laying two columns against each other gets no shift out of it.
+    @test astrip(dark) == astrip(lit)
+    @test length(split(dark, "\n")) == length(split(lit, "\n")) == 16
+
+    # It is a way of drawing and not a way of behaving: an unfocused widget
+    # still edits, because whether it should be sent keys at all is the host's
+    # question and this is only the answer to how it looks.
+    @test handle!(ta, keycode('!')) === :ok
+    @test text(ta) == "a remark!"
+    ta.focused = true
+    @test occursin("\e[7m", render(ta, 60, 16))
+end
+
 end # testset TermInput

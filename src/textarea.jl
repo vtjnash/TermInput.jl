@@ -56,6 +56,7 @@ mutable struct TextArea
     hint::String
     maxwidth::Int            # the widest the box is drawn, however wide the screen
     suspend::Any             # runs a closure with the terminal handed back
+    focused::Bool            # does it have the keyboard? see `render`
 end
 
 """The key hints under a text area: the keys it actually owns, and no others.
@@ -78,9 +79,9 @@ so a host with a terminal should pass one.
 """
 TextArea(title, note = ""; initial::AbstractString = "",
          hint::AbstractString = TEXTAREA_HINT, maxwidth::Int = 100,
-         suspend = f -> f()) =
+         suspend = f -> f(), focused::Bool = true) =
     TextArea(String(title), String(note), TextBuffer(initial), 1, "", String(hint),
-             maxwidth, suspend)
+             maxwidth, suspend, focused)
 
 text(v::TextArea) = text(v.buf)
 
@@ -123,7 +124,13 @@ function render(v::TextArea, w::Int, h::Int)
     push!(out, b.row(""))
     for i in v.top:(v.top + bh - 1)
         line = i <= length(rows) ? rows[i] : ""
-        i == crow && (line = drawcursor(line, ccol))
+        # No cursor while the keyboard is somewhere else. A host that draws this
+        # beside something else - the browser this was split out of draws a
+        # composer next to the diff it is about - has two things on screen and
+        # one of them has the keys; two cursors would say neither does. `focused`
+        # defaults to true, so a widget that is the only thing on screen, which
+        # is every other use of this, never has to say so.
+        i == crow && v.focused && (line = drawcursor(line, ccol))
         push!(out, b.row(line))
     end
     push!(out, b.foot())
