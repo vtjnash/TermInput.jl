@@ -13,14 +13,19 @@ using TermInput
 import TermInput: render, handle!, text
 
 ta = TextArea("Comment", "on managers.jl:544")
-print(render(ta, 80, 24))              # `h` rows of exactly `w` columns
-act = handle!(ta, key)                 # :ok | :submit | :cancel | :unhandled
-act === :submit && post(submission(ta))
+print(render(ta, 80, 24))               # `h` rows of exactly `w` columns
+if handle!(ta, key) === :unhandled      # not an edit, so it is yours
+    key == 19 && post(submission(ta))   # ...and this is what `^s` means
+end
 ```
 
 Nothing here reads stdin, holds raw mode, or runs a loop. A host has all three
 already, and a widget that insisted on its own would be one you cannot put in
 the program you are writing.
+
+Nor does it decide when you are finished. It is a text box: the keys it claims
+are the ones that edit text, and what `^s` or `↵` or escape mean over the top of
+that is the host's.
 
 ## What it does that a `readline` does not
 
@@ -31,7 +36,10 @@ the program you are writing.
   of this package can be tested without a tty.
 * **A key it does not claim comes back.** `handle!` answers `:unhandled` rather
   than swallowing the key, so a host's own bindings keep working inside
-  somebody else's composer. There is no callback table to register with.
+  somebody else's composer. There is no callback table to register with,
+  because there is nothing to register with it - and "finished", "cancelled"
+  and "may an empty one be sent" come back the same way, since a text box
+  cannot answer those for every program that embeds one.
 * **The editing model is separate from the view.** `TextBuffer` is lines, a
   cursor, and the operations - `insert!`, `newline!`, `backspace!`,
   `deleteword!`, `killline!`, `move!` - with no screen attached. A program that
@@ -66,9 +74,11 @@ whole emacs-mode binding set and what each one does here. **Not relevant** means
 the key is about something this is not - a shell's history, a full-screen
 program's screen, a region between a mark and the point.
 
-The two widgets do not bind the same set, and where they differ the cell says
-which. Everything a `TextArea` binds and a `LineInput` does not comes back as
-`:unhandled`, so it is the host's to use.
+Every key here either edits the text or comes back as `:unhandled`. The keys
+that *finish* - `^s`, `↵`, escape, `^g` - are in the table as **host's**: the
+widget hands them over, and the row says what a host would sensibly do with
+them. The two widgets do not bind the same set either, and where they differ the
+cell says which.
 
 | key | readline calls it | here |
 |---|---|---|
@@ -76,7 +86,7 @@ which. Everything a `TextArea` binds and a `LineInput` does not comes back as
 | `^p` `^n` | previous-history, next-history | ✅ `TextArea` only, as previous-line / next-line, and so are `↑`/`↓`. A `LineInput` has no second line to reach and no history to walk, so all four come back |
 | `^a` `^e` | beginning-of-line, end-of-line | ✅ and Home / End |
 | `⌥b` `⌥f` | backward-word, forward-word | ✅ and ctrl-arrows |
-| `^d` | delete-char | ✅ and Delete. Not end-of-file on an empty buffer: escape is how you leave |
+| `^d` | delete-char | ✅ and Delete. Not end-of-file on an empty buffer - leaving is the host's |
 | `⌫` | backward-delete-char | ✅ |
 | `^t` | transpose-chars | ✅ |
 | `⌥t` | transpose-words | ⬜ skipped - `^t` is muscle memory and this one is not |
@@ -90,12 +100,12 @@ which. Everything a `TextArea` binds and a `LineInput` does not comes back as
 | `⌥y` | yank-pop | ⬜ skipped - the second entry of a kill ring is somebody using this as their editor. `killed` is a plain string, so a host can keep a ring and set it |
 | `^_` `^x^u` | undo | ⬜ skipped - `⌥e` opens `$EDITOR`, where undo, search and your own keymap already are. The biggest of the deliberate omissions, and the one to revisit first |
 | `^q` `^v` | quoted-insert | ⬜ skipped - it needs the host's decoder to hand over the next key undecoded, which is a contract this does not have yet |
-| `↵` `^j` | accept-line | ✅ splits the line in a `TextArea`; accepts in a `LineInput`, and an empty one is a `:cancel` rather than a submission of nothing |
-| `^s` | forward-search-history | ❌ not relevant - no history. `TextArea` binds it to submit instead, since the key that finishes a multi-line buffer cannot be `↵`; a `LineInput` leaves it alone. Note that it is XOFF under terminal flow control, so a host has to have cleared `IXON` for it to arrive at all |
+| `↵` `^j` | accept-line | ✅ splits the line in a `TextArea`, which is an edit. 🔸 host's in a `LineInput`, where there is no line to split |
+| `^s` | forward-search-history | ❌ not relevant - no history. 🔸 comes back, which is what lets a host make it the key that finishes a multi-line buffer, since `↵` cannot be. Note it is XOFF under terminal flow control, so a host has to have cleared `IXON` for it to arrive at all |
 | `^r` | reverse-search-history | ❌ not relevant - no history, and nothing binds it, so it is free for a host |
-| `^g` | abort | ✅ same as escape |
 | `^l` | clear-screen | ❌ not relevant - the host draws the frame and owns the screen |
 | `^c` | (SIGINT, not a binding) | ❌ not relevant - the host owns the signal |
+| `esc` `^g` | (esc is a terminal key; `^g` is abort) | 🔸 host's - abandoning a buffer is not something a text box should decide the cost of, and `isblank` is what to ask before deciding |
 | `⌥<` `⌥>` `⌥.` | history motion, yank-last-arg | ❌ not relevant - no history |
 | `^x^e` | edit-and-execute-command | ✅ `TextArea` only, as `⌥e` and `^o` - `⌥e` is what the Julia REPL binds to the same move. A one-line field has nothing worth opening an editor for |
 | `^@` `^x^x` `^w`-as-kill-region | set-mark, exchange-point-and-mark, kill-region | ❌ not relevant - there is no mark and no region |
@@ -135,7 +145,7 @@ same widget. `InputBox` collects keystrokes; this edits text.
 | readline keys | none | `^a` `^e` `^k` `^u` `^w` `^d`, alt-backspace, alt-arrows |
 | delete | the last character only | before the cursor, under it, by word, by line |
 | multi-line | `↵` appends a newline; no wrapping, no row mapping | soft wrap, and the cursor mapped onto the wrapped row |
-| finishing | `esc` quits the app; the text is read off the field | `:submit` / `:cancel` back to the caller |
+| finishing | `esc` quits the app; the text is read off the field | the host's - the key comes back and the host says what it meant |
 | measuring | `Panel`, so markup | display width |
 | input | `readkey` under `bytesavailable`, polled | one key code, from whatever loop the host has |
 
@@ -147,10 +157,11 @@ a key code from a host that has already done that.
 
 | | |
 |---|---|
-| `TextArea(title, note; initial, allow_empty, hint, maxwidth, suspend)` | the composer |
+| `TextArea(title, note; initial, hint, maxwidth, suspend)` | the composer |
 | `LineInput(title, note; initial, hint, maxwidth)` | one line in a box |
 | `v.status` | a line the footer shows instead of the hints, cleared by the next key |
-| `v.hint` | those hints; a host that has claimed keys should add to it |
+| `v.hint` | those hints, which name only the keys the widget owns; a host has to add its own |
+| `isblank(v)` | whether there is anything in it - what to ask before deciding what escape costs, or whether an empty one may be sent |
 | `TERM_THEME[].box` | Term's, and the box these are drawn in |
 
 ## Tests

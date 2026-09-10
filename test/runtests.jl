@@ -393,35 +393,37 @@ end
     type!("world")
     @test text(v) == "hello\nworld"
 
-    # `^s` submits, and what it submits is stripped: somebody who has finished
-    # typing has almost always left a newline behind them.
+    # Finishing is not the widget's. `^s`, escape and `^g` are edits of
+    # nothing, so they come back, and what they mean is decided over the top -
+    # here, by a test standing in for a host.
+    @test handle!(v, C_S) === :unhandled
+    @test handle!(v, 27) === :unhandled
+    @test handle!(v, C_G) === :unhandled
+    # ...and this is what a host does with them. `submission` is the text with
+    # the whitespace round it taken off, which is a convenience and not a rule.
     handle!(v, 13)
-    @test handle!(v, C_S) === :submit
-    @test submission(v) == "hello\nworld"
+    @test submission(v) == "hello\nworld" && text(v) == "hello\nworld\n"
 
-    # Escape is a cancel and nothing more. Whether that needs confirming is the
-    # host's question, and `isblank` is what it asks.
-    @test handle!(v, 27) === :cancel
+    # Whether an empty one may be sent is the same question from the other
+    # side, and the same answer: `isblank` is what a host asks, and the widget
+    # neither refuses nor allows.
     @test !isblank(v)
     @test isblank(TextArea("t"))
+    @test isblank(TextArea("t"; initial = "  \n  "))
 
-    # An empty buffer refuses to submit and says why, unless the widget was
-    # made to allow it - an approval needs no words, a comment does.
-    e = TextArea("t")
-    @test handle!(e, C_S) === :ok && occursin("nothing to send", e.status)
-    @test handle!(TextArea("t"; allow_empty = true), C_S) === :submit
-    # The next keystroke clears the status, so it never outlives what it was
-    # about.
-    handle!(e, keycode('x'))
-    @test isempty(e.status)
-
-    # A key the widget does not bind is the host's, handed straight back rather
-    # than swallowed: that is how a program keeps its own keys working inside
+    # A key the widget does not use is handed straight back rather than
+    # swallowed: that is how a program keeps its own keys working inside
     # somebody else's composer.
+    e = TextArea("t")
     @test handle!(e, C_R) === :unhandled
     @test handle!(e, K_STAB) === :unhandled
     @test handle!(e, K_PGUP) === :unhandled
     @test handle!(e, keycode('y')) === :ok       # but a character is not
+    # The status is a host's line, and the next keystroke clears it so that it
+    # never outlives what it was about.
+    e.status = "something a host said"
+    handle!(e, keycode('x'))
+    @test isempty(e.status)
 
     # The readline keys, and the two word rules through them.
     r = TextArea("t")
@@ -456,8 +458,6 @@ end
     @test text(y) == "alpha beta"
     handle!(y, C_T)
     @test text(y) == "alpha beat"                # the last two, swapped
-    # `^g` is readline's abort, and means here what escape means.
-    @test handle!(y, C_G) === :cancel
 end
 
 @testset "the text area draws a frame of exactly the size asked for" begin
@@ -507,17 +507,20 @@ end
     handle!(p, C_W)                              # ^w: the whole path at once
     @test text(p) == ""
 
-    # An answer of nothing is somebody changing their mind, not a submission.
-    @test handle!(p, 13) === :cancel
+    # `↵` has no line to split here, so it comes back like every other key the
+    # widget has no edit for - and what it means, including whether an empty
+    # answer is one, is the host's.
+    @test handle!(p, 13) === :unhandled && handle!(p, 10) === :unhandled
     for c in "  spaced  "; handle!(p, keycode(c)); end
-    @test handle!(p, 13) === :submit && submission(p) == "spaced"
-    @test handle!(p, 27) === :cancel
+    @test submission(p) == "spaced"
+    @test handle!(p, 27) === :unhandled
     # There is no second line to reach, so the keys that would make one are the
     # host's - and `^p`/`^n`, which readline gives to the history, go back for a
     # host that has one.
     @test handle!(p, K_UP) === :unhandled
     @test handle!(p, K_PGDN) === :unhandled
     @test handle!(p, C_P) === :unhandled && handle!(p, C_N) === :unhandled
+    @test handle!(p, C_S) === :unhandled
     # The rest of the editing is the text area's, including the kill buffer.
     p = LineInput("t")
     for c in "alpha beta"; handle!(p, keycode(c)); end
@@ -525,7 +528,7 @@ end
     @test text(p) == "alpha beta"
     handle!(p, C_A); handle!(p, K_WORD_KILL)
     @test text(p) == " beta"
-    @test handle!(p, C_G) === :cancel
+    @test handle!(p, C_G) === :unhandled
 
     # A newline in a one-row field is not a character to draw: the frame is
     # clamped by element, so one element holding a newline prints as two rows,
@@ -553,19 +556,23 @@ end
     li() = LineInput("t"; initial = "ab cd")
     differ = [k for k in every if act(ta, k) !== act(li, k)]
 
-    # A second line to reach, a key that finishes a multi-line buffer, and an
-    # editor worth opening. Nothing else.
-    @test Set(differ) == Set([C_P, C_N, K_UP, K_DOWN, 13, 10, C_S, K_EDIT, C_O])
-    @test act(ta, C_S) === :submit && act(li, C_S) === :unhandled
-    @test act(ta, 13) === :ok && act(li, 13) === :submit
+    # A second line to reach, a line to split, and an editor worth opening.
+    # Nothing else.
+    @test Set(differ) == Set([C_P, C_N, K_UP, K_DOWN, 13, 10, K_EDIT, C_O])
+    @test act(ta, 13) === :ok && act(li, 13) === :unhandled
     @test act(ta, K_EDIT) === :ok && act(li, K_EDIT) === :unhandled
     @test act(ta, K_UP) === :ok && act(li, K_UP) === :unhandled
 
-    # And the keys neither of them claims, which are a host's to bind: the two
-    # search keys, quoted-insert, clear-screen, tab and the pages.
-    for k in (C_R, 12, 17, 22, 0, 9, K_STAB, K_PGUP, K_PGDN)
+    # And the keys neither of them claims, which are a host's to bind. The
+    # first four are how a program finishes, gives up, or does something of its
+    # own - none of which a text box can answer for the program around it.
+    for k in (C_S, 27, C_G, C_R, 12, 17, 22, 0, 9, K_STAB, K_PGUP, K_PGDN)
         @test act(ta, k) === :unhandled && act(li, k) === :unhandled
     end
+    # Nothing returns anything but these two any more: a widget that answered
+    # "submitted" or "cancelled" would be answering for its host.
+    @test Set(vcat([act(ta, k) for k in every], [act(li, k) for k in every])) ⊆
+          Set(ACTIONS) == Set([:ok, :unhandled])
 end
 
 @testset "the box comes from Term's theme" begin

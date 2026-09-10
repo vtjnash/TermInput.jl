@@ -8,17 +8,22 @@
 
 """What a widget did with a key.
 
-  * `:ok`         it handled it, and the frame should be drawn again
-  * `:submit`     the text is finished - [`submission`](@ref) is what to take
-  * `:cancel`     escape, or an empty line accepted; nothing was submitted
-  * `:unhandled`  not a key this widget binds, so it is the host's
+  * `:ok`         it used the key, and the frame should be drawn again
+  * `:unhandled`  not a key this widget uses, so it is the host's
 
-`:unhandled` is the one worth designing around. A composer sits inside somebody
-else's program, and that program has keys of its own it wants to work here -
-dropping a template in, cycling a target, whatever it is. Rather than a table of
-callbacks, anything this does not claim is handed straight back.
+Two values, and the second is the one the design turns on. A text box holds
+text and knows how to change it. It does not know what *finishing* means -
+whether that is `^s` or `↵` or a button, whether an empty one may be submitted,
+what escape costs, or whether escape should ask first - and a widget that
+answered any of those would be answering them for every program that embeds it.
+So the only keys it claims are the ones that edit text, everything else comes
+straight back, and the host decides what to make of it.
+
+That is also the answer to a host with keys of its own it wants working inside a
+composer - dropping a template in, cycling a target, whatever it is. There is no
+callback table to register with, because there is nothing to register with it.
 """
-const ACTIONS = (:ok, :submit, :cancel, :unhandled)
+const ACTIONS = (:ok, :unhandled)
 
 """A small multi-line text area.
 
@@ -33,12 +38,14 @@ unreachable.
 
     ta = TextArea("Comment", "on managers.jl:544")
     print(render(ta, 80, 24))
-    handle!(ta, key)          # :ok | :submit | :cancel | :unhandled
+    if handle!(ta, key) === :unhandled      # not an edit, so it is yours
+        key == 19 && post(submission(ta))   # ...and this is what `^s` means
+    end
 
 Fields worth setting after construction: `status` is a line the footer shows
 instead of the key hints - a host's answer to what just happened, cleared by the
-next keystroke - and `hint` is those key hints, which a host that has claimed
-keys of its own should add to.
+next keystroke - and `hint` is those key hints, which a host has to add its own
+keys to, since the widget does not know what they are.
 """
 mutable struct TextArea
     title::String
@@ -47,49 +54,54 @@ mutable struct TextArea
     top::Int                 # first display row shown
     status::String
     hint::String
-    allow_empty::Bool        # an approval needs no words; a comment does
     maxwidth::Int            # the widest the box is drawn, however wide the screen
     suspend::Any             # runs a closure with the terminal handed back
 end
 
-"""The key hints under an empty-handed text area."""
-const TEXTAREA_HINT =
-    "^s submit · ⌥e/^o \$EDITOR · ^w word · ^a/^e line · esc cancel"
+"""The key hints under a text area: the keys it actually owns, and no others.
+
+How to finish and how to give up are not here because they are not the widget's
+- a host that has bound them has to say so, which is what `hint` is for.
+"""
+const TEXTAREA_HINT = "⌥e/^o \$EDITOR · ^w word · ^a/^e line · ^y yank"
 
 """
-    TextArea(title, note = ""; initial, allow_empty, hint, maxwidth, suspend)
+    TextArea(title, note = ""; initial, hint, maxwidth, suspend)
 
 `initial` is what is already written - a draft being resumed, a template - and
-the cursor starts at the end of it. `allow_empty` says whether `^s` on an empty
-buffer submits or refuses: an approval needs no words, a comment does.
+the cursor starts at the end of it.
 
 `suspend` is how the terminal is handed back while `\$EDITOR` runs; see
 [`suspend`](@ref). The default runs the editor without handing anything over,
 which is right when there is nothing to hand over and wrong in a raw-mode TUI -
 so a host with a terminal should pass one.
 """
-TextArea(title, note = ""; initial::AbstractString = "", allow_empty::Bool = false,
+TextArea(title, note = ""; initial::AbstractString = "",
          hint::AbstractString = TEXTAREA_HINT, maxwidth::Int = 100,
          suspend = f -> f()) =
     TextArea(String(title), String(note), TextBuffer(initial), 1, "", String(hint),
-             allow_empty, maxwidth, suspend)
+             maxwidth, suspend)
 
 text(v::TextArea) = text(v.buf)
 
-"""What a `:submit` submitted: the text with the whitespace round it taken off.
+"""The text with the whitespace round it taken off - what a host takes when it
+decides the widget is finished.
 
-Never the raw buffer. Somebody who has finished typing has almost always left a
-newline behind them, and every consumer of this would otherwise have to know
-that.
+A convenience and not a rule: somebody who has finished typing has almost always
+left a newline behind them, and every consumer of [`text`](@ref) would otherwise
+have to know that. `text` is still there for a host that wants the buffer as it
+stands.
 """
 submission(v) = String(strip(text(v)))
 
 """Is there anything in here worth not throwing away?
 
-What a host asks when escape arrives: words that were typed and are nowhere else
-are the one thing in a program worth a confirmation, and an empty buffer is not
-one of them - a question about it would put a dialog in front of every composer
-opened by mistake.
+What a host asks when escape arrives, and before it submits. Words that were
+typed and are nowhere else are the one thing in a program worth a confirmation,
+and an empty buffer is not one of them - a question about it would put a dialog
+in front of every composer opened by mistake. Whether an empty one may be
+submitted at all is the same question from the other side, and the same answer:
+the host's.
 """
 isblank(v::TextArea) = isblank(v.buf)
 
@@ -161,26 +173,19 @@ displaycolumn(line::AbstractString, col::Int) =
 
 Hand one key code to the text area. See [`ACTIONS`](@ref) for what comes back.
 
-The keys, in the order they are tried: escape and `^g` cancel, `^s` submits,
-`⌥e`/`^o` open `\$EDITOR`, `↵` splits the line, and the rest is readline - the
-kills (`^k`, `^u`, `^w`, `⌥⌫`, `⌥d`) and `^y` to put them back, `^t`, the
-motions (`^b`/`^f`/`^p`/`^n`, `^a`/`^e`, the arrows, home and end) and `^d`.
-Anything else printable is inserted as the bytes it arrived as. The README has
-the whole readline table, including what is deliberately not here.
+Every key it claims edits the text. `⌥e`/`^o` open `\$EDITOR`, `↵` splits the
+line, and the rest is readline - the kills (`^k`, `^u`, `^w`, `⌥⌫`, `⌥d`) and
+`^y` to put them back, `^t`, the motions (`^b`/`^f`/`^p`/`^n`, `^a`/`^e`, the
+arrows, home and end) and `^d`. Anything else printable is inserted as the bytes
+it arrived as, and anything else at all comes back as `:unhandled` - escape and
+`^s` included, since finishing is not a text box's to define. The README has the
+whole readline table, including what is deliberately not here.
 """
 function handle!(v::TextArea, k::Int)
     k = unshift(k)
     v.status = ""
     b = v.buf
-    if k == 27 || k == C_G
-        return :cancel
-    elseif k == C_S
-        if isblank(b) && !v.allow_empty
-            v.status = "nothing to send — esc cancels"
-            return :ok
-        end
-        return :submit
-    elseif k in (K_EDIT, C_O)                       # hand it to $EDITOR
+    if k in (K_EDIT, C_O)                           # hand it to $EDITOR
         (txt, note) = compose_external(v.suspend, text(b))
         settext!(b, txt)
         v.status = note

@@ -14,10 +14,15 @@
 
     li = LineInput("Snooze until", "a date, or a number of days")
     print(render(li, 80, 24))
-    handle!(li, key)          # :ok | :submit | :cancel | :unhandled
+    if handle!(li, key) === :unhandled     # not an edit, so it is yours
+        key in (13, 10) && accept(submission(li))
+    end
 
-`↵` on an empty line is `:cancel` rather than a submission of nothing: a prompt
-answered with nothing is a prompt somebody changed their mind in front of.
+`↵` is not bound, which is the one place this differs from [`TextArea`](@ref)
+for a reason other than the second line: there it splits the line, and here
+there is no line to split, so it comes back like every other key the widget has
+no edit for. What it *means* - accept, or accept-unless-empty, or nothing - is
+the host's, the same as everywhere else.
 """
 mutable struct LineInput
     title::String
@@ -28,8 +33,12 @@ mutable struct LineInput
     maxwidth::Int
 end
 
-"""The key hints under a line input."""
-const LINEINPUT_HINT = "enter accept · ^w word · ^a/^e line · esc cancel"
+"""The key hints under a line input: the keys it actually owns, and no others.
+
+How to accept and how to give up are not here because they are not the widget's
+- a host that has bound them has to say so, which is what `hint` is for.
+"""
+const LINEINPUT_HINT = "^w word · ^a/^e line · ^y yank"
 
 """
     LineInput(title, note = ""; initial, hint, maxwidth)
@@ -70,19 +79,15 @@ end
 Hand one key code to the line input. See [`ACTIONS`](@ref) for what comes back.
 
 The same keys as [`TextArea`](@ref) less the ones that need a second line: `↵`
-accepts rather than splitting, and `^p`/`^n` are not bound at all. There is no
-history here for them to walk, which is what readline gives them, so they are
-handed back for a host that has one.
+has no line to split, and `^p`/`^n` have no line to move to. There is no history
+here for them to walk either, which is what readline gives them, so all of them
+are handed back for a host that has somewhere to go.
 """
 function handle!(v::LineInput, k::Int)
     k = unshift(k)
     v.status = ""
     b = v.buf
-    if k in (13, 10)
-        return isblank(b) ? :cancel : :submit
-    elseif k == 27 || k == C_G
-        return :cancel
-    elseif k in (127, 8)
+    if k in (127, 8)
         backspace!(b)
     elseif k in (K_DEL, C_D)
         deletechar!(b)

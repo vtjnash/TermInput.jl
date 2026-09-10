@@ -13,15 +13,20 @@ for a terminal.
     import TermInput: render, handle!, text
 
     ta = TextArea("Comment", "on managers.jl:544")
-    print(render(ta, 80, 24))            # `h` rows of exactly `w` columns
-    act = handle!(ta, key)               # :ok | :submit | :cancel | :unhandled
-    act === :submit && post(submission(ta))
+    print(render(ta, 80, 24))               # `h` rows of exactly `w` columns
+    if handle!(ta, key) === :unhandled      # not an edit, so it is yours
+        key == 19 && post(submission(ta))   # ...and this is what `^s` means
+    end
 
 Nothing here reads stdin, holds raw mode, or runs a loop. A host has all three
 already, and a widget that insisted on its own would be one you cannot put in
 the program you are writing - so `render` is a pure function of the widget and a
-size, `handle!` takes one key code, and a key this does not claim comes straight
-back as `:unhandled`.
+size, and `handle!` takes one key code.
+
+Nor does it decide when you are finished. The keys it claims are the ones that
+*edit text*; what `^s` or `↵` or escape mean over the top of that is the host's,
+because a text box that answered it would be answering it for every program that
+embeds one.
 
 ## The pieces
 
@@ -100,8 +105,9 @@ handle!
 """
     text(widget) -> String
 
-What is written, exactly as it is written. [`submission`](@ref) is what to take
-when a widget says `:submit`. Not exported, for the same reason as
+What is written, exactly as it is written. [`submission`](@ref) is the same with
+the whitespace round it taken off, which is usually what a host wants when it
+decides the widget is finished. Not exported, for the same reason as
 [`render`](@ref).
 """
 text
