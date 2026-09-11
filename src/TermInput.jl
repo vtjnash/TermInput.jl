@@ -59,7 +59,7 @@ export ESCAPE, awidth, astrip, afit, apad, amid, awrap
 export TextBuffer, settext!, curline, move!, newline!, insertblock!, backspace!,
        deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
        kill!, yank!, transpose!, word_start, word_end, bufferrows, isblank
-export boxstyle, dialogbox, centred
+export boxstyle, dialogbox, centred, CHROME
 export suspend, compose_external, mouse_reporting
 export TextArea, LineInput, ACTIONS, submission, TEXTAREA_HINT, LINEINPUT_HINT
 # The key vocabulary is a host's to produce and every widget's to bind, so it is

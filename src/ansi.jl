@@ -62,21 +62,27 @@ end
     afit(s, w) -> String
 
 Truncate to `w` display columns, keeping escapes, and reset style at the cut.
+
+The reset is only written when the part that was kept has an escape in it,
+because otherwise there is nothing to reset: plain text cut short used to come
+back with a `\\e[0m` stuck to the end of it, which is invisible on a terminal
+and is noise everywhere else - a pipe, a test asserting that a program drawing
+plain text emits no escapes, a string being compared against what was typed.
 """
 function afit(s::AbstractString, w::Int)
     w <= 0 && return ""
     awidth(s) <= w && return s
-    io, acc, i = IOBuffer(), 0, firstindex(s)
+    io, acc, i, styled = IOBuffer(), 0, firstindex(s), false
     while i <= lastindex(s)
         m = match(ESCAPE, SubString(s, i))
         if m !== nothing
-            write(io, m.match); i += ncodeunits(m.match); continue
+            write(io, m.match); i += ncodeunits(m.match); styled = true; continue
         end
         cw = textwidth(s[i])
         acc + cw > w - 1 && break
         write(io, s[i]); acc += cw; i = nextind(s, i)
     end
-    String(take!(io)) * "…\e[0m"
+    string(String(take!(io)), "…", styled ? "\e[0m" : "")
 end
 
 """

@@ -63,9 +63,9 @@ column(v::LineInput) = v.buf.col
 function render(v::LineInput, w::Int, h::Int)
     b = dialogbox(w; width = v.maxwidth)
     line = curline(v.buf)
-    out = [b.top(), b.row(v.title, "\e[1m"), b.row("")]
+    out = [b.top(), b.row(v.title, CHROME[].strong), b.row("")]
     for l in awrap(v.note, b.iw)
-        push!(out, b.row(l, "\e[2m"))
+        push!(out, b.row(l, CHROME[].quiet))
     end
     push!(out, b.row(string("> ", drawcursor(line, displaycolumn(line, v.buf.col)))))
     push!(out, b.foot())

@@ -22,9 +22,12 @@ import InteractiveUtils
     @test astrip("\e[32mgreen\e[0m") == "green"
     @test apad("ab", 5) == "ab   " && awidth(apad("ab", 5)) == 5
     @test awidth(apad("\e[32mab\e[0m", 5)) == 5
-    # Truncation keeps the escapes it passed and closes the style at the cut.
+    # Truncation keeps the escapes it passed and closes the style at the cut -
+    # but only where there was a style to close. Plain text cut short comes
+    # back plain, so a program that emits no escapes goes on emitting none.
     @test awidth(afit("abcdefgh", 4)) == 4
-    @test endswith(afit("abcdefgh", 4), "…\e[0m")
+    @test afit("abcdefgh", 4) == "abc…"
+    @test endswith(afit("\e[32mabcdefgh", 4), "…\e[0m")
     @test afit("abc", 10) == "abc"
     @test afit("abc", 0) == ""
     @test awidth(afit("\e[32mabcdefgh\e[0m", 4)) == 4

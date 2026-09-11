@@ -119,7 +119,7 @@ function render(v::TextArea, w::Int, h::Int)
 
     out = [b.head(v.title)]
     for l in awrap(v.note, b.iw)
-        push!(out, b.row(l, "\e[2m"))
+        push!(out, b.row(l, CHROME[].quiet))
     end
     push!(out, b.row(""))
     for i in v.top:(v.top + bh - 1)
