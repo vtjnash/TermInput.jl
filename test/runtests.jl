@@ -100,6 +100,26 @@ end
         end
     end
 
+    # A hyperlink open at a break is closed on that row and reopened on the
+    # next, or the terminal runs it on across whatever is drawn beside the
+    # line - it knows nothing of panes. Each row carries a whole link.
+    on, off = "\e]8;;https://x.example/a/b\e\\", "\e]8;;\e\\"
+    lk = awrap(string("see ", on, "\e[4mthe linked words here\e[24m", off, " after"), 12)
+    @test all(awidth(l) <= 12 for l in lk) && length(lk) >= 3
+    @test count(l -> count(on, l) == count(off, l), lk) == length(lk)
+    @test count(l -> occursin(on, l), lk) >= 2       # reopened on the next row
+    @test astrip(join(lk, "")) == "see the linked words here after"
+    # A link split mid-run - a bare url wider than the pane - the same.
+    u = awrap(string(on, "https://x.example/", "p"^40, off), 16)
+    @test all(count(on, l) == count(off, l) for l in u) && length(u) > 1
+    # And one closed before the break is not reopened after it.
+    cl = awrap(string(on, "ab", off, " then more words to wrap"), 10)
+    @test count(l -> occursin(on, l), cl) == 1
+    # A cut is a break with nothing after it: the link is closed at it.
+    cut = afit(string("see ", on, "the linked words", off, " after"), 12)
+    @test awidth(cut) <= 12 && count(on, cut) == count(off, cut) == 1
+    @test count(off, afit(string(on, "ab", off, " and the rest of it"), 10)) == 1  # not twice
+
     # Degenerate widths do not loop or throw.
     @test awrap("anything", 1) == ["anything"]
 end

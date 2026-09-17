@@ -21,6 +21,9 @@
 takes no columns."
 const ESCAPE = r"^(?:\e\[[0-9;]*[A-Za-z]|\e\][^\e]*\e\\)"
 
+"The OSC 8 that ends a hyperlink: the same sequence with no url in it."
+const LINK_OFF = "\e]8;;\e\\"
+
 """
     awidth(s) -> Int
 
@@ -68,21 +71,27 @@ because otherwise there is nothing to reset: plain text cut short used to come
 back with a `\\e[0m` stuck to the end of it, which is invisible on a terminal
 and is noise everywhere else - a pipe, a test asserting that a program drawing
 plain text emits no escapes, a string being compared against what was typed.
+
+A hyperlink whose close fell past the cut is closed at it too: an SGR reset
+does not end an OSC 8, and a link left open runs on across whatever is drawn
+next - see `awrap`.
 """
 function afit(s::AbstractString, w::Int)
     w <= 0 && return ""
     awidth(s) <= w && return s
-    io, acc, i, styled = IOBuffer(), 0, firstindex(s), false
+    io, acc, i, styled, link = IOBuffer(), 0, firstindex(s), false, false
     while i <= lastindex(s)
         m = match(ESCAPE, SubString(s, i))
         if m !== nothing
-            write(io, m.match); i += ncodeunits(m.match); styled = true; continue
+            write(io, m.match); i += ncodeunits(m.match); styled = true
+            startswith(m.match, "\e]8;") && (link = m.match != LINK_OFF)
+            continue
         end
         cw = textwidth(s[i])
         acc + cw > w - 1 && break
         write(io, s[i]); acc += cw; i = nextind(s, i)
     end
-    string(String(take!(io)), "…", styled ? "\e[0m" : "")
+    string(String(take!(io)), "…", link ? LINK_OFF : "", styled ? "\e[0m" : "")
 end
 
 """
@@ -152,6 +161,13 @@ each continuation line, or a colour opened before the break would stop at it.
 Escapes travel with the word they style, so that a word carried to the next line
 takes its colour with it.
 
+A hyperlink (OSC 8) is the same thing the other way round: an SGR left open
+across the break merely stops, but a link left open runs on - across whatever
+the host draws to the right of the line, since the terminal knows nothing of
+panes, until its close arrives on the next row. So a link open at a break is
+closed at the end of the line and reopened at the start of the next, and each
+row's link is a row's worth.
+
 And a run wider than the pane has nowhere to break - a URL, a stack frame, a
 type signature, all of which this is full of - so it falls back to breaking
 mid-run rather than overflowing the pane.
@@ -162,24 +178,27 @@ function awrap(s::AbstractString, w::Int)
     line, word = IOBuffer(), IOBuffer()   # committed; and the run since a space
     lw, ww = 0, 0                         # their display widths
     active = String[]                     # SGR codes in force right now
-    wactive = String[]                    # ...and as of the start of `word`
+    link = ""                             # the OSC 8 open right now, or ""
+    wactive = String[]                    # ...and both as of the start of `word`
+    wlink = ""
     breakable = false                     # does `line` end at a space?
-    emit!(codes) = begin
+    emit!(codes, lk) = begin
+        isempty(lk) || write(line, LINK_OFF)
         push!(out, String(take!(line)))
         lw = 0
         isempty(codes) || write(line, join(codes))
+        isempty(lk) || write(line, lk)
     end
     commit!() = begin                     # fold the word into the line
         write(line, String(take!(word)))
         lw += ww; ww = 0
-        wactive = copy(active)
+        wactive = copy(active); wlink = link
     end
     carry!() = begin                      # move the word down to a new line
-        before = copy(wactive)            # what was in force before the word
-        emit!(before)                     # the word replays its own codes
-        write(line, String(take!(word)))
+        emit!(copy(wactive), wlink)       # what was in force before the word;
+        write(line, String(take!(word)))  # the word replays its own codes
         lw = ww; ww = 0
-        wactive = copy(active)
+        wactive = copy(active); wlink = link
         breakable = false
     end
     i = firstindex(s)
@@ -190,6 +209,8 @@ function awrap(s::AbstractString, w::Int)
             write(word, e)                # zero width, and belongs to the word
             if startswith(e, "\e[")
                 e == "\e[0m" ? empty!(active) : push!(active, e)
+            elseif startswith(e, "\e]8;")
+                link = e == LINK_OFF ? "" : e
             end
             i += ncodeunits(m.match)
             continue
@@ -202,7 +223,7 @@ function awrap(s::AbstractString, w::Int)
             if breakable
                 carry!()
             else
-                commit!(); emit!(active)  # no space to break at; split the run
+                commit!(); emit!(active, link)  # no space to break at; split the run
                 breakable = false
             end
         end
