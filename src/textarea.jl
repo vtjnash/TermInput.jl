@@ -85,6 +85,9 @@ TextArea(title, note = ""; initial::AbstractString = "",
 
 text(v::TextArea) = text(v.buf)
 
+"""A paste, as the text it is - see [`paste!(::TextBuffer, ::AbstractString)`](@ref)."""
+paste!(v::TextArea, s::AbstractString) = (paste!(v.buf, s); v)
+
 """The text with the whitespace round it taken off - what a host takes when it
 decides the widget is finished.
 

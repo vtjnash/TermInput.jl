@@ -356,6 +356,28 @@ end
     insertblock!(TextBuffer("x"), "a\r\nb")
 end
 
+@testset "a paste is text, and the cursor ends after it" begin
+    b = TextBuffer("head tail")
+    b.col = 6
+    paste!(b, "one\rtwo\r\nthree")
+    @test b.lines == ["head one", "two", "threetail"]
+    @test (b.row, b.col) == (3, 6)
+    # A tab is kept; an escape, which would be a command to the terminal the
+    # buffer is drawn on, is not.
+    c = paste!(TextBuffer(), "a\tb\e[31mc\x7f")
+    @test c.lines == ["a\tb[31mc"]
+    # One line in a one-line field: breaks become spaces, and the one a copied
+    # line ends on goes.
+    li = LineInput("t")
+    TermInput.paste!(li, "https://x/y\n")
+    @test text(li) == "https://x/y"
+    TermInput.paste!(li, " a\r\nb")
+    @test text(li) == "https://x/y a b"
+    ta = TextArea("t"; initial = "x")
+    TermInput.paste!(ta, "\ny")
+    @test text(ta) == "x\ny"
+end
+
 @testset "the cursor maps onto the rows that are drawn" begin
     b = TextBuffer("0123456789abcdefghij")
     rows, crow, ccol = bufferrows(b, 10)
@@ -654,6 +676,15 @@ end
     end
     @test occursin(mouse_reporting(false), m) && occursin(mouse_reporting(true), m)
     @test !occursin(mouse_reporting(false), out)
+    # Bracketed paste the same way: a shell that never asked for the markers
+    # would read them as keys.
+    p = mktemp() do path, io
+        redirect_stdout(() -> suspend(() -> nothing, nothing; paste = true), io)
+        flush(io)
+        read(path, String)
+    end
+    @test findfirst(bracketed_paste(false), p) < findfirst(bracketed_paste(true), p)
+    @test !occursin(bracketed_paste(false), out)
 
     # And it puts the screen back even when the body throws, which is the case
     # that matters: a terminal left in raw mode with no alternate screen is a

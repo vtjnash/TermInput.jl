@@ -56,11 +56,11 @@ import REPL
 import InteractiveUtils
 
 export ESCAPE, awidth, astrip, afit, apad, amid, awrap
-export TextBuffer, settext!, curline, move!, newline!, insertblock!, backspace!,
+export TextBuffer, settext!, curline, move!, newline!, insertblock!, paste!, backspace!,
        deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
        kill!, yank!, transpose!, word_start, word_end, bufferrows, isblank
 export boxstyle, dialogbox, centred, CHROME
-export suspend, compose_external, mouse_reporting
+export suspend, compose_external, mouse_reporting, bracketed_paste
 export TextArea, LineInput, ACTIONS, submission, TEXTAREA_HINT, LINEINPUT_HINT
 # The key vocabulary is a host's to produce and every widget's to bind, so it is
 # re-exported rather than left behind the submodule: a program that reads a

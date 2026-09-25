@@ -245,6 +245,35 @@ function insertblock!(b::TextBuffer, s::AbstractString)
     b
 end
 
+"""
+    paste!(b, s) -> TextBuffer
+
+Put `s` in at the cursor as text, however many lines it is, and leave the
+cursor after it - where typing it would have.
+
+What a bracketed paste delivers, and so not keys: a tab or a newline in it is
+the character and nothing else. A terminal sends a pasted line break as `\\r`,
+so each of `\\r\\n`, `\\r` and `\\n` is one. Every other control character is
+dropped, since the buffer is drawn as it stands and an escape in it would be a
+command to the terminal.
+"""
+function paste!(b::TextBuffer, s::AbstractString)
+    clampcursor!(b); endkill!(b)
+    s = replace(String(s), "\r\n" => "\n", '\r' => '\n')
+    s = filter(c -> c == '\n' || c == '\t' || !iscntrl(c), s)
+    isempty(s) && return b
+    ins = String.(split(s, "\n"))
+    head, tail = split_at_cursor(b)
+    b.lines[b.row] = string(head, ins[1])
+    for (j, x) in enumerate(ins[2:end])
+        Base.insert!(b.lines, b.row + j, x)
+    end
+    b.row += length(ins) - 1
+    b.col = length(b.lines[b.row]) + 1
+    b.lines[b.row] *= tail
+    b
+end
+
 """Join the line the cursor is on onto the one above, cursor at the seam."""
 function joinup!(b::TextBuffer)
     b.row > 1 || return b

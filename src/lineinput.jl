@@ -55,6 +55,11 @@ names a row that has moved."""
 oneline(s::AbstractString) = replace(replace(String(s), "\r\n" => " "), '\n' => ' ', '\r' => ' ')
 
 text(v::LineInput) = text(v.buf)
+
+"""A paste, as one line: the line breaks inside it become spaces and the one
+it ends on - a copied line nearly always carries it - goes."""
+paste!(v::LineInput, s::AbstractString) =
+    (paste!(v.buf, oneline(rstrip(String(s), ('\r', '\n')))); v)
 isblank(v::LineInput) = isblank(v.buf)
 
 "Where the cursor is, as a column in the line. 1 is before the first character."

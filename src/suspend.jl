@@ -20,16 +20,25 @@ strings in step with this one.
 """
 mouse_reporting(on::Bool) = on ? "\e[?1006h\e[?1002h" : "\e[?1002l\e[?1006l"
 
+"""The escape sequences that turn bracketed paste on and off.
+
+With it on, a terminal sends a paste between `ESC [ 200 ~` and `ESC [ 201 ~`
+instead of as keys, so a host can take it as text: without it a pasted `q` is
+a keystroke like any other, and a pasted tab moves the focus.
 """
-    suspend(f, term; mouse = false)
+bracketed_paste(on::Bool) = on ? "\e[?2004h" : "\e[?2004l"
+
+"""
+    suspend(f, term; mouse = false, paste = false)
 
 Give the terminal back for the duration of `f`, then take it again.
 
 For handing stdin to a child process - `\$EDITOR`, mainly. Everything a TUI does
 to the terminal is undone in order and redone after: mouse reporting off, raw
 mode off, the cursor shown, the alternate screen released, so the child gets a
-terminal that looks untouched and its own scrollback. `mouse` says whether the
-host had mouse reporting on, since only it knows.
+terminal that looks untouched and its own scrollback. `mouse` and `paste` say
+whether the host had mouse reporting and bracketed paste on, since only it
+knows - and a shell that never asked for the brackets would read them as keys.
 
 `term` is a `REPL.Terminals.TTYTerminal`, or `nothing` where there is no
 terminal to hand over - a test, or a program whose output is a pipe. Everything
@@ -42,8 +51,9 @@ and the keystrokes it wins are gone. The rule for a host with a reader task is
 that it must be parked between events rather than sitting in `read`, and that
 this runs while it is parked.
 """
-function suspend(f, term; mouse::Bool = false)
+function suspend(f, term; mouse::Bool = false, paste::Bool = false)
     mouse && print(mouse_reporting(false))
+    paste && print(bracketed_paste(false))
     term === nothing || REPL.Terminals.raw!(term, false)
     print("\e[?25h\e[?1049l")
     try
@@ -52,6 +62,7 @@ function suspend(f, term; mouse::Bool = false)
         print("\e[?1049h\e[?25l")
         term === nothing || REPL.Terminals.raw!(term, true)
         mouse && print(mouse_reporting(true))
+        paste && print(bracketed_paste(true))
     end
 end
 
