@@ -157,7 +157,8 @@ a key code from a host that has already done that.
 
 | | |
 |---|---|
-| `TextArea(title, note; initial, hint, maxwidth, suspend)` | the composer |
+| `TextArea(title, note; initial, hint, maxwidth, focused)` | the composer |
+| `handle!(ta, k; suspend)` | how the terminal is handed back while `$EDITOR` runs |
 | `LineInput(title, note; initial, hint, maxwidth)` | one line in a box |
 | `v.status` | a line the footer shows instead of the hints, cleared by the next key |
 | `v.hint` | those hints, which name only the keys the widget owns; a host has to add its own |

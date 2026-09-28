@@ -71,8 +71,8 @@ end
 
 Hand `initial` to `\$EDITOR` in a temporary file, and take back whatever comes
 out. `suspend` is a one-argument function that runs its argument with the
-terminal given back - [`suspend`](@ref) bound to the host's own terminal, or
-anything else that does the same job.
+terminal given back and returns what it returns - [`suspend`](@ref) bound to
+the host's own terminal, or anything else that does the same job.
 
 `InteractiveUtils.edit` is used rather than spawning `\$EDITOR` directly, so that
 `JULIA_EDITOR` and the `define_editor` hooks apply and the editor that opens is
@@ -87,12 +87,14 @@ function compose_external(suspend, initial::AbstractString)
     path = string(tempname(), ".md")
     write(path, initial)
     before = read(path, String)
-    err = ""
-    suspend() do
+    # The error is the block's value rather than assigned inside it: a local a
+    # closure assigns is boxed, and untyped from then on.
+    err::String = suspend() do
         try
             InteractiveUtils.edit(path)
+            ""
         catch e
-            err = first(sprint(showerror, e), 100)
+            first(sprint(showerror, e), 100)
         end
     end
     txt = try

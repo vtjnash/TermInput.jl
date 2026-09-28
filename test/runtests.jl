@@ -717,9 +717,10 @@ end
         withenv(f, "JULIA_EDITOR" => name, "EDITOR" => nothing, "VISUAL" => nothing)
 
     calls = Ref(0)
-    v = TextArea("t"; initial = "before", suspend = f -> (calls[] += 1; f()))
+    counted(f) = (calls[] += 1; f())
+    v = TextArea("t"; initial = "before")
     aseditor("terminput_test_editor") do
-        @test handle!(v, K_EDIT) === :ok
+        @test handle!(v, K_EDIT; suspend = counted) === :ok
     end
     @test text(v) == "edited\nby somebody else\n"
     @test (v.buf.row, v.buf.col) == (3, 1)   # the cursor is at the end of it
@@ -728,9 +729,9 @@ end
 
     # `^o` is the same move, because a terminal that treats Option as a compose
     # key sends no Meta at all and would leave the editor unreachable.
-    w = TextArea("t"; initial = "before", suspend = f -> (calls[] += 1; f()))
+    w = TextArea("t"; initial = "before")
     aseditor("terminput_test_editor") do
-        handle!(w, C_O)
+        handle!(w, C_O; suspend = counted)
     end
     @test text(w) == text(v) && calls[] == 2
 

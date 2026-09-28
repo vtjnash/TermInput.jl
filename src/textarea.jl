@@ -55,7 +55,6 @@ mutable struct TextArea
     status::String
     hint::String
     maxwidth::Int            # the widest the box is drawn, however wide the screen
-    suspend::Any             # runs a closure with the terminal handed back
     focused::Bool            # does it have the keyboard? see `render`
 end
 
@@ -67,21 +66,18 @@ How to finish and how to give up are not here because they are not the widget's
 const TEXTAREA_HINT = "⌥e/^o \$EDITOR · ^w word · ^a/^e line · ^y yank"
 
 """
-    TextArea(title, note = ""; initial, hint, maxwidth, suspend)
+    TextArea(title, note = ""; initial, hint, maxwidth, focused)
 
 `initial` is what is already written - a draft being resumed, a template - and
-the cursor starts at the end of it.
-
-`suspend` is how the terminal is handed back while `\$EDITOR` runs; see
-[`suspend`](@ref). The default runs the editor without handing anything over,
-which is right when there is nothing to hand over and wrong in a raw-mode TUI -
-so a host with a terminal should pass one.
+the cursor starts at the end of it. How the terminal is handed back while
+`\$EDITOR` runs is not the widget's: it is given with the key, to
+[`handle!`](@ref).
 """
 TextArea(title, note = ""; initial::AbstractString = "",
          hint::AbstractString = TEXTAREA_HINT, maxwidth::Int = 100,
-         suspend = f -> f(), focused::Bool = true) =
+         focused::Bool = true) =
     TextArea(String(title), String(note), TextBuffer(initial), 1, "", String(hint),
-             maxwidth, suspend, focused)
+             maxwidth, focused)
 
 text(v::TextArea) = text(v.buf)
 
@@ -179,9 +175,17 @@ displaycolumn(line::AbstractString, col::Int) =
 # --- keys -------------------------------------------------------------------
 
 """
-    handle!(v::TextArea, k) -> Symbol
+    handle!(v::TextArea, k; suspend = f -> f()) -> Symbol
 
 Hand one key code to the text area. See [`ACTIONS`](@ref) for what comes back.
+
+`suspend` is how the terminal is handed back while `\$EDITOR` runs: a
+one-argument function that runs its argument and returns what it returns - see
+[`suspend`](@ref). The default hands nothing over, which is right when there is
+nothing to hand over and wrong in a raw-mode TUI, so a host with a terminal
+passes one. An argument rather than a field, because it is a function: stored,
+it is a field of no particular type and a dynamic call, which `--trim` cannot
+compile; passed, the call is compiled for the function it is.
 
 Every key it claims edits the text. `⌥e`/`^o` open `\$EDITOR`, `↵` splits the
 line, and the rest is readline - the kills (`^k`, `^u`, `^w`, `⌥⌫`, `⌥d`) and
@@ -191,12 +195,14 @@ it arrived as, and anything else at all comes back as `:unhandled` - escape and
 `^s` included, since finishing is not a text box's to define. The README has the
 whole readline table, including what is deliberately not here.
 """
-function handle!(v::TextArea, k::Int)
+# `where F`: a function only passed on, never called here, is otherwise not
+# specialised on, and the call it is passed to is dynamic after all.
+function handle!(v::TextArea, k::Int; suspend::F = f -> f()) where {F}
     k = unshift(k)
     v.status = ""
     b = v.buf
     if k in (K_EDIT, C_O)                           # hand it to $EDITOR
-        (txt, note) = compose_external(v.suspend, text(b))
+        (txt, note) = compose_external(suspend, text(b))
         settext!(b, txt)
         v.status = note
     elseif k in (13, 10)
