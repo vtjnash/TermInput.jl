@@ -182,25 +182,9 @@ function awrap(s::AbstractString, w::Int)
     wactive = String[]                    # ...and both as of the start of `word`
     wlink = ""
     breakable = false                     # does `line` end at a space?
-    emit!(codes, lk) = begin
-        isempty(lk) || write(line, LINK_OFF)
-        push!(out, String(take!(line)))
-        lw = 0
-        isempty(codes) || write(line, join(codes))
-        isempty(lk) || write(line, lk)
-    end
-    commit!() = begin                     # fold the word into the line
-        write(line, String(take!(word)))
-        lw += ww; ww = 0
-        wactive = copy(active); wlink = link
-    end
-    carry!() = begin                      # move the word down to a new line
-        emit!(copy(wactive), wlink)       # what was in force before the word;
-        write(line, String(take!(word)))  # the word replays its own codes
-        lw = ww; ww = 0
-        wactive = copy(active); wlink = link
-        breakable = false
-    end
+    # No closures over the counters: a local a closure assigns is boxed, and
+    # every sum and comparison on it is then a dynamic call - one per
+    # character, and each one an error to `--trim`.
     i = firstindex(s)
     while i <= lastindex(s)
         m = match(ESCAPE, SubString(s, i))
@@ -220,15 +204,23 @@ function awrap(s::AbstractString, w::Int)
         # A loop rather than a branch: a word carried down can still be wider
         # than the pane on its own, and then has to be split anyway.
         while lw + ww + cw > w
-            if breakable
-                carry!()
-            else
-                commit!(); emit!(active, link)  # no space to break at; split the run
-                breakable = false
+            if breakable                  # move the word down to a new line,
+                emit!(out, line, wactive, wlink)  # under what was in force
+                write(line, take!(word))  # before it; it replays its own codes
+                lw = ww
+            else                          # no space to break at; split the run
+                write(line, take!(word))
+                emit!(out, line, active, link)
+                lw = 0
             end
+            ww = 0
+            wactive = copy(active); wlink = link
+            breakable = false
         end
         if isspace(c)
-            commit!()
+            write(line, take!(word))      # fold the word into the line
+            lw += ww; ww = 0
+            wactive = copy(active); wlink = link
             write(line, c); lw += cw
             breakable = true
         else
@@ -236,7 +228,17 @@ function awrap(s::AbstractString, w::Int)
         end
         i = nextind(s, i)
     end
-    write(line, String(take!(word)))
+    write(line, take!(word))
     push!(out, String(take!(line)))
     out
+end
+
+"""End the row `line` holds, and start the next under `codes` and the link `lk`:
+closed at the break and reopened after it, so each row's link is a row's worth."""
+function emit!(out::Vector{String}, line::IOBuffer, codes::Vector{String}, lk::String)
+    isempty(lk) || write(line, LINK_OFF)
+    push!(out, String(take!(line)))
+    isempty(codes) || write(line, join(codes))
+    isempty(lk) || write(line, lk)
+    nothing
 end
