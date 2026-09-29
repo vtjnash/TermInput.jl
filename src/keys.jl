@@ -6,16 +6,17 @@ character someone typed.
 
 A submodule because it is the piece with the fewest ties to anything else. It
 is the widgets' binding table and nothing more - what turns bytes from a
-terminal *into* these codes is a decoder, and there is not one here yet: a host
-already has an input loop of its own, and this package's job is what happens
-after a key has been read. `handle!` takes one of these codes, so producing
-them is the whole of what a host has to do to drive a widget.
+terminal *into* these codes is the host's, and stays the host's. A host already
+has an input loop of its own, and only the host knows what is in front of it:
+a terminal whose dialect it has to read, or a multiplexer that has already put
+every terminal's keys into one form. This package's job is what happens after
+a key has been read. `handle!` takes one of these codes, so producing them is
+the whole of what a host has to do to drive a widget.
 
 `REPL.TerminalMenus.readkey` is what people reach for and it is not enough on
 its own: it cannot see a mouse report at all, and it drops any sequence it does
 not recognise as a bare `Escape`, leaving the tail to arrive as separate
-keystrokes - which is how Shift-Tab reads as Escape-then-Z. A decoder that
-produces this vocabulary belongs here eventually; see the README.
+keystrokes - which is how Shift-Tab reads as Escape-then-Z.
 """
 module Keys
 
