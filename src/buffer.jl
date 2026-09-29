@@ -445,6 +445,23 @@ end
 
 # --- where the cursor is on a wrapped screen --------------------------------
 
+"""What a character is drawn as: itself, or - for a control character, which
+the terminal would obey rather than show - one column that says what it was.
+
+A buffer holds what was pasted, set, or brought back from `\$EDITOR`, and that
+can be anything. A tab is zero columns to `textwidth` and up to eight to the
+terminal, which pushes the border out; an escape is a command. So a tab is
+drawn as a space, and every other control as its picture - `␛`, `␍`, `␡` - or
+`�` past where those run out. The text itself keeps them: this is only the
+drawing, and it is one character for one, so a cursor counted in characters
+lands where it is drawn.
+"""
+function shown(c::AbstractChar)
+    isvalid(c) && iscntrl(c) || return c
+    c == '\t' ? ' ' : c < ' ' ? Char(0x2400 + UInt32(c)) : c == '\x7f' ? '␡' : '�'
+end
+shown(s::AbstractString) = map(shown, s)
+
 """Split a line into fixed-width pieces, exactly as a text area draws it.
 
 Not [`awrap`](@ref): that one carries ANSI state across the break and its wrap
@@ -453,10 +470,11 @@ direction - from a character offset to the row and column it lands on - so the
 rule is the simplest one there is, and the text area owns it.
 """
 function chunks(s::AbstractString, w::Int)
-    w <= 0 && return [String(s)]
+    w <= 0 && return [shown(s)]
     isempty(s) && return [""]
     out, io, acc = String[], IOBuffer(), 0
     for c in s
+        c = shown(c)
         cw = textwidth(c)
         if acc + cw > w
             push!(out, String(take!(io))); acc = 0
@@ -475,10 +493,12 @@ result: `crow` indexes `rows`, `ccol` is a 1-based column within that row.
 
 This is the mapping that makes a soft-wrapped text area behave. Getting it
 wrong is not subtle - the cursor draws on the wrong row - but it is easy to get
-wrong in exactly one place, at the end of a line whose width is a multiple of
-the wrap: there the character offset says the cursor is at column `w + 1` of a
-row that ended, and the answer is the row after it, which does not exist yet.
-Every editor makes one, and so does this.
+wrong in exactly one place, at the end of a line whose last row is full: there
+the cursor is at column `w + 1` of a row that ended, and the answer is the row
+after it, which does not exist yet. Every editor makes one, and so does this.
+
+The rows are what is drawn, so a control character in them is its picture
+(see `shown`).
 """
 function bufferrows(b::TextBuffer, w::Int)
     # A width of zero is a box with no room in it, which a host can ask for on
@@ -489,10 +509,17 @@ function bufferrows(b::TextBuffer, w::Int)
     for (i, l) in enumerate(b.lines)
         cs = chunks(l, w)
         if i == b.row
-            pre = textwidth(String(first(l, max(0, b.col - 1))))
-            pre > 0 && pre % w == 0 && length(cs) == pre ÷ w && push!(cs, "")
-            crow = length(rows) + pre ÷ w + 1
-            ccol = pre % w + 1
+            # By the rows as `chunks` cut them, not by `w`: a wide character
+            # that does not fit goes to the next row, so a row can end short.
+            k, j = max(0, b.col - 1), 1       # characters before the cursor
+            while j < length(cs) && k >= length(cs[j])
+                k -= length(cs[j]); j += 1
+            end
+            ccol = textwidth(first(cs[j], k)) + 1
+            if j == length(cs) && ccol > w && k > 0
+                push!(cs, ""); j += 1; ccol = 1
+            end
+            crow = length(rows) + j
         end
         append!(rows, cs)
     end

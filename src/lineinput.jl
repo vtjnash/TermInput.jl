@@ -69,10 +69,10 @@ function render(v::LineInput, w::Int, h::Int)
     b = dialogbox(w; width = v.maxwidth)
     line = curline(v.buf)
     out = [b.top(), b.row(v.title, CHROME[].strong), b.row("")]
-    for l in awrap(v.note, b.iw)
+    for l in awraplines(v.note, b.iw)
         push!(out, b.row(l, CHROME[].quiet))
     end
-    push!(out, b.row(string("> ", drawcursor(line, displaycolumn(line, v.buf.col)))))
+    push!(out, b.row(string("> ", drawfield(line, v.buf.col, b.iw - 2))))
     push!(out, b.foot())
     push!(out, b.hint(isempty(v.status) ? v.hint : v.status))
     centred(out, w, h)

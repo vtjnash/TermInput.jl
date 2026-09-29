@@ -117,7 +117,7 @@ function render(v::TextArea, w::Int, h::Int)
     v.top = clamp(v.top, 1, max(1, length(rows) - bh + 1))
 
     out = [b.head(v.title)]
-    for l in awrap(v.note, b.iw)
+    for l in awraplines(v.note, b.iw)
         push!(out, b.row(l, CHROME[].quiet))
     end
     push!(out, b.row(""))
@@ -166,6 +166,37 @@ function drawcursor(line::AbstractString, ccol::Int)
         (" ", "")
     end
     string(pre, "\e[7m", at, "\e[0m", post)
+end
+
+"""
+    drawfield(line, col, w) -> String
+
+A line in `w` columns with the cursor drawn on it, scrolled sideways so the
+cursor is on screen.
+
+A `LineInput` and a `Choice`'s query are one row, and the box cuts a line
+longer than that at its end - which is where the cursor is while typing. So a
+cursor that would be cut takes the line with it: the front goes, a `…` says so,
+and the cursor sits at the right. Nothing is kept between frames to do it: it
+is a function of the line and the cursor, as the rest of a frame is.
+"""
+function drawfield(line::AbstractString, col::Int, w::Int)
+    s = shown(line)
+    cs = collect(s)
+    k = clamp(col - 1, 0, length(cs))             # characters before the cursor
+    cw = k < length(cs) ? textwidth(cs[k + 1]) : 1
+    width(r) = sum(textwidth, r; init = 0)
+    fits = width(cs) + (k == length(cs) ? 1 : 0) <= w
+    # The box cuts a long line to `w - 1` columns and a `…`, so the cursor has
+    # to end before the last column to survive it.
+    if !fits && w >= 3 && width(@view cs[1:k]) + cw > w - 1
+        i = k + 1
+        while i > 1 && 1 + width(@view cs[(i - 1):k]) + cw <= w - 1
+            i -= 1
+        end
+        return drawcursor(string("…", String(cs[i:end])), 2 + width(@view cs[i:k]))
+    end
+    drawcursor(s, displaycolumn(s, col))
 end
 
 """The display column the cursor is in, for a cursor counted in characters."""

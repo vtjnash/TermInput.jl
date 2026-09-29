@@ -233,6 +233,12 @@ function awrap(s::AbstractString, w::Int)
     out
 end
 
+"""The rows of a note in a box `w` wide: each of its lines, wrapped.
+
+`awrap` is one paragraph, and a `\\n` in it is a character like any other -
+which a row then draws, and a frame that promised `h` rows is one longer."""
+awraplines(s::AbstractString, w::Int) = String[l for p in split(s, '\n') for l in awrap(p, w)]
+
 """End the row `line` holds, and start the next under `codes` and the link `lk`:
 closed at the break and reopened after it, so each row's link is a row's worth."""
 function emit!(out::Vector{String}, line::IOBuffer, codes::Vector{String}, lk::String)

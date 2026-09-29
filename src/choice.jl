@@ -75,6 +75,8 @@ numkey(i::Int) = i < 1 || i > 10 ? ' ' : i == 10 ? '0' : Char('0' + i)
 
 """Pick one of a list, narrowing by typing.
 
+    import TermInput: render, handle!    # `picked` is exported
+
     c = Choice("Labels", "↵ toggles one", ["bug", "docs", "performance"])
     print(render(c, 80, 24))
     if handle!(c, key) === :unhandled      # not a move or an edit
@@ -134,12 +136,16 @@ query(c::Choice) = text(c.input)
 "Set the query, as if it had been typed, and go back to the top of the list."
 query!(c::Choice, s::AbstractString) = (settext!(c.input.buf, oneline(s)); c.sel = 1; c)
 
+"""Lower case, but a malformed byte - which a paste or a confused terminal can
+put in the query, and `lowercase` throws on - stays the byte it was."""
+fold(s::AbstractString) = map(ch -> isvalid(ch) ? lowercase(ch) : ch, s)
+
 """The options the query leaves showing, as indices into `labels`: those whose
 label, lines under it included, holds the query, ignoring case and escapes."""
 function matches(c::Choice)
-    q = lowercase(query(c))
+    q = fold(query(c))
     isempty(q) && return collect(eachindex(c.labels))
-    Int[i for (i, l) in enumerate(c.labels) if occursin(q, lowercase(astrip(l)))]
+    Int[i for (i, l) in enumerate(c.labels) if occursin(q, fold(astrip(l)))]
 end
 
 "The option under the cursor, as an index into `labels`, or 0 when none shows."
@@ -175,9 +181,12 @@ function render(c::Choice, w::Int, h::Int)
     c.sel, c.top, win = listwindow(hs, c.sel, c.top, bh)
 
     out = [b.head(c.title)]
-    isempty(c.note) || push!(out, b.row(c.note, ch.quiet))
+    notes = isempty(c.note) ? String[] : awraplines(c.note, b.iw)
+    for l in notes
+        push!(out, b.row(l, ch.quiet))
+    end
     line = curline(c.input.buf)
-    push!(out, b.row(string("/ ", drawcursor(line, displaycolumn(line, c.input.buf.col)))))
+    push!(out, b.row(string("/ ", drawfield(line, c.input.buf.col, b.iw - 2))))
     c.omap = Int[]
     for i in win, (j, l) in enumerate(optlines(c.labels[m[i]]))
         length(c.omap) < bh || break
@@ -196,10 +205,10 @@ function render(c::Choice, w::Int, h::Int)
     push!(out, b.foot())
     push!(out, b.hint(c.hint))
     # Where the rows land, for a click: `centred` puts the box in the middle,
-    # and the options start after the head, the note and the query row.
+    # and the options start after the head, the note's rows and the query row.
     blank = max(0, (h - length(out)) ÷ 2)
     c.boxrows = (blank + 1):(blank + length(out))
-    orow = blank + 3 + (isempty(c.note) ? 0 : 1)
+    orow = blank + 3 + length(notes)
     c.orows = orow:(orow + bh - 1)
     centred(out, w, h)
 end
@@ -305,7 +314,7 @@ Confirm(title, notes, keys::AbstractVector = ["yY"];
 function render(c::Confirm, w::Int, h::Int)
     b = dialogbox(w; width = c.maxwidth)
     out = [b.head(c.title)]
-    for n in c.notes, l in awrap(n, b.iw)
+    for n in c.notes, l in awraplines(n, b.iw)
         push!(out, b.row(l, CHROME[].quiet))
     end
     push!(out, b.foot())

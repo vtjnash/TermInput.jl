@@ -40,6 +40,10 @@ an option at a time, and an option of several lines stays whole in the box
 puts the first ten on `1`-`9` and `0`, for a list reached by memory rather than
 by reading.
 
+`picked` and `answer` are exported. `click!`, and a `Choice`'s `query`,
+`query!`, `selected` and `matches`, are names a host is likely to have already,
+so they are imported by name the way `render` and `handle!` are.
+
 `click!(c, kind, x, y, at; window)` is the mouse, against where the last
 `render` put the rows: a press moves the cursor, the wheel moves it three, a
 double click answers `:pick` and a press outside the box `:unhandled`. The time

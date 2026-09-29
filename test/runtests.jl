@@ -10,7 +10,7 @@
 
 using Test
 using TermInput
-import TermInput: render, handle!, text, chunks, drawcursor, displaycolumn
+import TermInput: render, handle!, text, chunks, drawcursor, drawfield, displaycolumn
 import InteractiveUtils
 
 @testset "TermInput" begin
@@ -405,6 +405,19 @@ end
     d.col = 3
     _, crow, ccol = bufferrows(d, 4)
     @test (crow, ccol) == (2, 1)
+    # ...and a row a wide character did not fit on ends short, so the cursor is
+    # found by the rows as they were cut, not by dividing by the width.
+    e = TextBuffer("ab中")
+    @test bufferrows(e, 3) == (["ab", "中"], 2, 3)
+    e.col = 3
+    @test bufferrows(e, 3) == (["ab", "中"], 2, 1)
+    @test bufferrows(TextBuffer("a中"), 3) == (["a中", ""], 2, 1)
+
+    # A control character is drawn as one column that says what it was, and
+    # the text keeps it.
+    f = TextBuffer("a\tb\e[31mc\r")
+    @test first(bufferrows(f, 20)) == ["a b␛[31mc␍"]
+    @test text(f) == "a\tb\e[31mc\r"
 end
 
 @testset "the cursor is drawn where the terminal would put it" begin
@@ -529,6 +542,13 @@ end
     ls = split(render(tall, 80, 24), "\n")
     @test any(l -> occursin("line 1", l), ls)
 
+    # A note of several lines is several rows, and a tab or an escape in the
+    # buffer is one column rather than a jump or a command.
+    for v in (TextArea("T", "line1\nline2"), TextArea("T"; initial = "a\tb\e[31mc\r\td"))
+        ls = split(render(v, 40, 20), "\n")
+        @test length(ls) == 20 && all(awidth(l) == 40 for l in ls)
+    end
+
     # Whatever is in the buffer, including what a terminal sent and no
     # codepoint covers, comes back as columns rather than as an exception.
     odd = TextArea("t")
@@ -585,10 +605,24 @@ end
         ls = split(render(p, w, h), "\n")
         @test length(ls) == h && all(awidth(l) == w for l in ls)
     end
+
+    # A line longer than the box scrolls sideways to keep the cursor on it, and
+    # a `…` says what went off the front.
+    long = LineInput("t"; initial = join('a':'z') * join('0':'9') * join('A':'J'))
+    cursorline(v, w) = only(filter(l -> occursin("\e[7m", l), split(render(v, w, 10), "\n")))
+    l = astrip(cursorline(long, 30))
+    @test awidth(cursorline(long, 30)) == 30 && occursin("> …", l) && occursin("J  ", l)
+    long.buf.col = 1
+    @test occursin("> abc", astrip(cursorline(long, 30)))
+    long.buf.col = 30
+    l = cursorline(long, 30)
+    @test occursin("\e[7m3\e[0m…", l) && occursin("> …", astrip(l))
+    @test drawfield("abc", 4, 10) == drawcursor("abc", 4)
+    @test astrip(drawfield("abcdefghij", 11, 10)) == "…defghij "
 end
 
 @testset "a choice, narrowed by typing" begin
-    import TermInput: picked, answer, click!, query, query!, selected, matches, doubled
+    import TermInput: click!, query, query!, selected, matches, doubled
     c = Choice("Labels", "↵ toggles one", ["bug", "docs", "performance", "build\n  under it"])
     @test selected(c) == 1
     @test handle!(c, K_DOWN) === :ok && selected(c) == 2
@@ -620,6 +654,11 @@ end
     query!(c, ""); TermInput.paste!(c, "doc\n")
     @test query(c) == "doc" && matches(c) == [2]
 
+    # The query scrolls sideways, as a line input does.
+    query!(c, "x"^100)
+    @test occursin("/ …xxx", astrip(render(c, 60, 20)))
+    query!(c, "")
+
     # The frame, and where it put the rows, for the mouse.
     many = ["opt $i" * (iseven(i) ? "\n  under $i" : "") for i in 1:12]
     m = Choice("t", "", many; numbered = true)
@@ -639,6 +678,23 @@ end
     @test click!(m, :press, 10, first(m.boxrows) - 1, 7.0) === :unhandled
     @test doubled((1.0, 5, 5), 6, 5, 1.4, 0.5) && !doubled((1.0, 5, 5), 7, 5, 1.4, 0.5)
 
+    # A note of two lines is two rows, and the options - and the mouse - move
+    # down one for it.
+    t = Choice("t", "line one\nline two", ["a", "b"])
+    ls = split(astrip(render(t, 40, 12)), "\n")
+    @test length(ls) == 12 && all(awidth(l) == 40 for l in ls)
+    @test ls[first(t.orows) + 1] |> l -> occursin(" b ", l)
+    @test click!(t, :press, 10, first(t.orows) + 1, 1.0) === :ok && selected(t) == 2
+
+    # A malformed byte in the query - or a label - is matched as itself, not an
+    # error that leaves the picker unable to draw.
+    bad = Choice("t", "", ["a\x80b", "abc"])
+    @test handle!(bad, 0x80 + 0) === :ok && query(bad) == "\x80"
+    @test matches(bad) == [1] && selected(bad) == 1 && picked(bad, 13) == 1
+    @test length(split(render(bad, 40, 12), "\n")) == 12
+    query!(bad, "A")
+    @test matches(bad) == [1, 2]
+
     # The rows of a list in a box: the cursor's row whole, and the box full.
     @test listwindow([1, 3, 2, 1, 1], 2, 1, 3) == (2, 2, 2:2)
     @test listwindow([1, 3, 2, 1, 1], 3, 1, 3) == (3, 3, 3:4)
@@ -646,7 +702,8 @@ end
 end
 
 @testset "a question only named keys answer" begin
-    import TermInput: answer
+    # What a host calls to read a pick or an answer is exported with the widget.
+    @test :picked in names(TermInput) && :answer in names(TermInput)
     q = Confirm("Discard?", ["", "it is nowhere else"])
     @test q.notes == ["it is nowhere else"]
     @test answer(q, keycode('y')) == 1 && answer(q, keycode('Y')) == 1
@@ -656,6 +713,9 @@ end
     ls = split(render(q2, 60, 10), "\n")
     @test length(ls) == 10 && all(awidth(l) == 60 for l in ls)
     @test any(l -> occursin("esc goes back", l), ls)
+    q3 = Confirm("Quit", "a draft\nand a stash")
+    ls = split(astrip(render(q3, 60, 10)), "\n")
+    @test length(ls) == 10 && count(l -> occursin("a draft", l) || occursin("and a stash", l), ls) == 2
 end
 
 @testset "the two widgets differ in exactly four places" begin
