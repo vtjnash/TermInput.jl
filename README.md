@@ -1,12 +1,13 @@
 # TermInput.jl
 
-Text input for the terminal: a line to answer a question in and a box to write a
-paragraph in, drawn wherever your own TUI puts them.
+Text input for the terminal: a line to answer a question in, a box to write a
+paragraph in, a list to pick one of and a question only a named key answers,
+drawn wherever your own TUI puts them.
 
-The name is the design. An HTML `<input>` and `<textarea>` are a place to type
-inside a page that is not about typing: the page owns the layout, the element
-owns the caret and the keys, and what comes back out is a string. This is that,
-for a terminal.
+The name is the design. An HTML `<input>`, `<textarea>` and `<select>` are a
+place to type or choose inside a page that is not about typing: the page owns
+the layout, the element owns the caret and the keys, and what comes back out is
+a string or an option. This is that, for a terminal.
 
 ```julia
 using TermInput
@@ -23,9 +24,33 @@ Nothing here reads stdin, holds raw mode, or runs a loop. A host has all three
 already, and a widget that insisted on its own would be one you cannot put in
 the program you are writing.
 
-Nor does it decide when you are finished. It is a text box: the keys it claims
-are the ones that edit text, and what `^s` or `↵` or escape mean over the top of
-that is the host's.
+Nor does it decide when you are finished. The keys a widget claims are the
+ones that edit its text or move its cursor, and what `^s` or `↵` or escape mean
+over the top of that is the host's. A `Choice` does not pick either: `↵` and
+its digits come back, and `picked(c, k)` says which option they would pick, so
+what picking *does* stays the host's too.
+
+## The picker and the question
+
+A `Choice` is a list in a box with a `LineInput` at its head. Typing narrows
+the list - by the lines under an option as well as the option - and the query
+edits with every key a `LineInput` has. `↑`/`↓` and `^p`/`^n` move the cursor
+an option at a time, and an option of several lines stays whole in the box
+(`listwindow`, which is exported for a host's own lists). `numbered = true`
+puts the first ten on `1`-`9` and `0`, for a list reached by memory rather than
+by reading.
+
+`click!(c, kind, x, y, at; window)` is the mouse, against where the last
+`render` put the rows: a press moves the cursor, the wheel moves it three, a
+double click answers `:pick` and a press outside the box `:unhandled`. The time
+and the double click's window are arguments, since a terminal reports two
+presses as two and a widget that read the clock could not be tested without
+waiting.
+
+A `Confirm` is the question a `Choice` of two would be the wrong answer to: the
+yes is already under the cursor there, and `↵` takes it. Here only the keys it
+names answer - `answer(c, k)` says which, 0 for no - and everything else is no,
+escape included unless the question names it.
 
 ## What it does that a `readline` does not
 
@@ -77,13 +102,15 @@ program's screen, a region between a mark and the point.
 Every key here either edits the text or comes back as `:unhandled`. The keys
 that *finish* - `^s`, `↵`, escape, `^g` - are in the table as **host's**: the
 widget hands them over, and the row says what a host would sensibly do with
-them. The two widgets do not bind the same set either, and where they differ the
-cell says which.
+them. The two text widgets do not bind the same set either, and where they
+differ the cell says which. A `Choice`'s query is a `LineInput`, so it binds
+what a `LineInput` does, and the keys that would move it take the cursor
+instead.
 
 | key | readline calls it | here |
 |---|---|---|
 | `^b` `^f` | backward-char, forward-char | ✅ and the arrows |
-| `^p` `^n` | previous-history, next-history | ✅ `TextArea` only, as previous-line / next-line, and so are `↑`/`↓`. A `LineInput` has no second line to reach and no history to walk, so all four come back |
+| `^p` `^n` | previous-history, next-history | ✅ `TextArea` only, as previous-line / next-line, and so are `↑`/`↓`. A `LineInput` has no second line to reach and no history to walk, so all four come back. A `Choice` moves its cursor with them |
 | `^a` `^e` | beginning-of-line, end-of-line | ✅ and Home / End |
 | `⌥b` `⌥f` | backward-word, forward-word | ✅ and ctrl-arrows |
 | `^d` | delete-char | ✅ and Delete. Not end-of-file on an empty buffer - leaving is the host's |
@@ -100,7 +127,7 @@ cell says which.
 | `⌥y` | yank-pop | ⬜ skipped - the second entry of a kill ring is somebody using this as their editor. `killed` is a plain string, so a host can keep a ring and set it |
 | `^_` `^x^u` | undo | ⬜ skipped - `⌥e` opens `$EDITOR`, where undo, search and your own keymap already are. The biggest of the deliberate omissions, and the one to revisit first |
 | `^q` `^v` | quoted-insert | ⬜ skipped - it needs the host's decoder to hand over the next key undecoded, which is a contract this does not have yet |
-| `↵` `^j` | accept-line | ✅ splits the line in a `TextArea`, which is an edit. 🔸 host's in a `LineInput`, where there is no line to split |
+| `↵` `^j` | accept-line | ✅ splits the line in a `TextArea`, which is an edit. 🔸 host's in a `LineInput`, where there is no line to split, and in a `Choice`, where `picked` says which option it takes |
 | `^s` | forward-search-history | ❌ not relevant - no history. 🔸 comes back, which is what lets a host make it the key that finishes a multi-line buffer, since `↵` cannot be. Note it is XOFF under terminal flow control, so a host has to have cleared `IXON` for it to arrive at all |
 | `^r` | reverse-search-history | ❌ not relevant - no history, and nothing binds it, so it is free for a host |
 | `^l` | clear-screen | ❌ not relevant - the host draws the frame and owns the screen |

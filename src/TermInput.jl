@@ -1,13 +1,14 @@
 """
     TermInput
 
-Text input for the terminal: a line to answer a question in and a box to write a
-paragraph in, drawn wherever your own TUI puts them.
+Text input for the terminal: a line to answer a question in, a box to write a
+paragraph in, a list to pick one of and a question only a named key answers,
+drawn wherever your own TUI puts them.
 
-The name is the design. An HTML `<input>` and `<textarea>` are a place to type
-inside a page that is not about typing: the page owns the layout, the element
-owns the caret and the keys, and what comes back out is a string. This is that,
-for a terminal.
+The name is the design. An HTML `<input>`, `<textarea>` and `<select>` are a
+place to type or choose inside a page that is not about typing: the page owns
+the layout, the element owns the caret and the keys, and what comes back out is
+a string or an option. This is that, for a terminal.
 
     using TermInput
     import TermInput: render, handle!, text
