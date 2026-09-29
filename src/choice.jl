@@ -10,9 +10,12 @@
 # back the rest. What a pick *does* is the host's, and so is what escape means;
 # the widget only says which option a key would pick (`picked`).
 
-"""Scroll so the cursor's row is on screen, and report the window to draw.
+"""
+    listwindow(hs, sel, top, inner) -> (sel, top, rows)
 
-    (sel, top, rows) = listwindow(hs, sel, top, inner)
+Scroll so the cursor's row is on screen, and report the window to draw: the
+cursor `sel` and the first row shown `top`, both clamped, and the range of rows
+that fit in a box `inner` lines tall.
 
 Rows of `hs[i]` lines each - an option with lines of its own under it, a row of
 a host's list with more to say - so the window is of rows and the box of lines:
@@ -60,7 +63,12 @@ that read the clock itself could not be tested without waiting.
 doubled(last::Tuple{Float64,Int,Int}, x::Int, y::Int, at::Float64, window::Float64) =
     at - last[1] <= window && y == last[3] && abs(x - last[2]) <= 1
 
-"How long two presses can be apart and still be one double click, by default."
+"""
+    DOUBLECLICK
+
+How long two presses can be apart, in seconds, and still be one double click:
+the default `window` of [`click!`](@ref) and [`doubled`](@ref).
+"""
 const DOUBLECLICK = 0.5
 
 "The lines of an option's label: the option, then what is said under it."
@@ -73,7 +81,10 @@ anything.
 """
 numkey(i::Int) = i < 1 || i > 10 ? ' ' : i == 10 ? '0' : Char('0' + i)
 
-"""Pick one of a list, narrowing by typing.
+"""
+    Choice
+
+Pick one of a list, narrowing by typing.
 
     import TermInput: render, handle!    # `picked` is exported
 
@@ -100,6 +111,7 @@ reading, since it costs those ten the ability to be narrowed by typing a digit.
 
 `sel` and `top` are positions in what the query leaves showing
 ([`matches`](@ref)); `picked` and [`selected`](@ref) answer in `labels`.
+`status` and `hint` are fields a host may set, as on a [`TextArea`](@ref).
 """
 mutable struct Choice
     title::String
@@ -109,6 +121,7 @@ mutable struct Choice
     sel::Int
     top::Int
     numbered::Bool
+    status::String
     hint::String
     maxwidth::Int
     boxrows::UnitRange{Int}               # where the last render put the box, and
@@ -119,36 +132,69 @@ mutable struct Choice
 end
 
 """
-    Choice(title, note, labels; numbered = false, hint, maxwidth = 76)
+    CHOICE_HINT
+
+The key hints under a `Choice`: the keys it owns, which move the cursor and
+narrow the list. What `↵`, escape and the digits of a numbered list do is the
+host's - they come back from `handle!` - so a host says so in `hint`.
+"""
+const CHOICE_HINT = "↑/↓ move · type to narrow"
+
+"""
+    Choice(title, note, labels; numbered = false, hint = CHOICE_HINT,
+           maxwidth = DIALOG_WIDTH)
+
+A list of `labels` titled `title`, with `note` - what picking one does: a
+string, or a vector of rows, see [`notetext`](@ref) - drawn quietly under the
+title. `""` for none; it is not optional here only because `labels` follows it.
+
+  * `numbered` puts the first ten on keys of their own, `1`-`9` and `0`
+  * `hint`     the key hints under the box, which a host that binds `↵` and
+               escape - every host - adds to
+  * `maxwidth` the widest the box is drawn, however wide the screen
 """
 function Choice(title, note, labels::AbstractVector; numbered::Bool = false,
-                hint::AbstractString = numbered ? "0-9 picks · ↑/↓ move · ↵ pick · esc cancel" :
-                                                  "↑/↓ move · ↵ pick · esc cancel",
-                maxwidth::Int = 76)
-    Choice(String(title), String(note), String[String(l) for l in labels],
-           LineInput(""), 1, 1, numbered, String(hint), maxwidth,
+                hint::AbstractString = CHOICE_HINT, maxwidth::Int = DIALOG_WIDTH)
+    Choice(String(title), notetext(note), String[String(l) for l in labels],
+           LineInput(""), 1, 1, numbered, "", String(hint), maxwidth,
            1:0, 1:0, Int[], (0.0, 0, 0))
 end
 
-"What is typed to narrow the list."
+"""
+    query(c::Choice) -> String
+
+What is typed to narrow the list.
+"""
 query(c::Choice) = text(c.input)
 
-"Set the query, as if it had been typed, and go back to the top of the list."
+"""
+    query!(c::Choice, s) -> Choice
+
+Set the query, as if it had been typed, and go back to the top of the list.
+"""
 query!(c::Choice, s::AbstractString) = (settext!(c.input.buf, oneline(s)); c.sel = 1; c)
 
 """Lower case, but a malformed byte - which a paste or a confused terminal can
 put in the query, and `lowercase` throws on - stays the byte it was."""
 fold(s::AbstractString) = map(ch -> isvalid(ch) ? lowercase(ch) : ch, s)
 
-"""The options the query leaves showing, as indices into `labels`: those whose
-label, lines under it included, holds the query, ignoring case and escapes."""
+"""
+    matches(c::Choice) -> Vector{Int}
+
+The options the query leaves showing, as indices into `labels`: those whose
+label, lines under it included, holds the query, ignoring case and escapes.
+"""
 function matches(c::Choice)
     q = fold(query(c))
     isempty(q) && return collect(eachindex(c.labels))
     Int[i for (i, l) in enumerate(c.labels) if occursin(q, fold(astrip(l)))]
 end
 
-"The option under the cursor, as an index into `labels`, or 0 when none shows."
+"""
+    selected(c::Choice) -> Int
+
+The option under the cursor, as an index into `labels`, or 0 when none shows.
+"""
 function selected(c::Choice)
     m = matches(c)
     isempty(m) ? 0 : m[clamp(c.sel, 1, length(m))]
@@ -173,9 +219,9 @@ function picked(c::Choice, k::Int)
 end
 
 function render(c::Choice, w::Int, h::Int)
-    ch = CHROME[]
     m = matches(c)
     b = dialogbox(w; width = c.maxwidth)
+    ch = b.chrome
     hs = Int[length(optlines(c.labels[i])) for i in m]
     bh = clamp(sum(hs; init = 0), 1, max(1, h - 10))
     c.sel, c.top, win = listwindow(hs, c.sel, c.top, bh)
@@ -203,7 +249,7 @@ function render(c::Choice, w::Int, h::Int)
     end
     isempty(m) && (out[end] = b.row("nothing matches", ch.quiet))
     push!(out, b.foot())
-    push!(out, b.hint(c.hint))
+    push!(out, b.hint(isempty(c.status) ? c.hint : c.status))
     # Where the rows land, for a click: `centred` puts the box in the middle,
     # and the options start after the head, the note's rows and the query row.
     blank = max(0, (h - length(out)) ÷ 2)
@@ -223,6 +269,7 @@ list - the digits come back, because what picking means is the host's; see
 """
 function handle!(c::Choice, k::Int)
     k = unshift(k)
+    c.status = ""
     n = length(matches(c))
     if k in (K_DOWN, C_N)
         c.sel = clamp(c.sel + 1, 1, max(1, n))
@@ -238,7 +285,11 @@ function handle!(c::Choice, k::Int)
     :ok
 end
 
-"A paste goes into the query, as one line."
+"""
+    paste!(c::Choice, s) -> Choice
+
+A paste goes into the query, as one line.
+"""
 paste!(c::Choice, s::AbstractString) = (paste!(c.input, s); c.sel = 1; c)
 
 """
@@ -273,10 +324,13 @@ function click!(c::Choice, kind::Symbol, x::Int, y::Int, at::Float64;
     dbl ? :pick : :ok
 end
 
-"""Ask a question that named keys answer, and nothing else does.
+"""
+    Confirm
 
-    c = Confirm("Discard what you have written?", "it is not saved anywhere",
-                ["yY"]; hint = "y discards · any other key keeps it")
+Ask a question that named keys answer, and nothing else does.
+
+    c = Confirm("Discard what you have written?", "it is not saved anywhere";
+                hint = "y discards · any other key keeps it")
     print(render(c, 80, 24))
     answer(c, key) == 1 && discard()       # 0 is no, whatever the key was
 
@@ -287,35 +341,54 @@ default, named in the hint - and *everything* else is no, including the key
 that opened the question and the enter that would have picked something in a
 picker.
 
-`keys` is one string for each answer, every key that gives it (`"yY"`, so shift
-does not matter); more than one is how a question offers the thing you would
-rather do than say yes. `notes` is a line or several: what is at stake, one
-fact to a row, wrapped rather than cut at the width.
+There is no `status`: a key ends a question, so there is no next frame for a
+line saying what happened to be drawn in. `hint` may be set after construction,
+as on the other widgets.
 """
-struct Confirm
+mutable struct Confirm
     title::String
-    notes::Vector{String}
+    note::String
     hint::String
     keys::Vector{String}
     maxwidth::Int
 end
 
-noterows(s::AbstractString) = isempty(s) ? String[] : [String(s)]
-noterows(v) = String[String(r) for r in v if !isempty(r)]
+"""
+    CONFIRM_HINT
+
+The key hint under a `Confirm` that answers to the default `"yY"`: which key is
+yes, and that every other one is no. What yes *does* is the host's, and a host
+that says so - "y discards it" - says it better.
+"""
+const CONFIRM_HINT = "y yes · any other key no"
 
 """
-    Confirm(title, notes, keys = ["yY"]; hint, maxwidth = 76)
+    Confirm(title, note, keys = ["yY"]; hint = CONFIRM_HINT, maxwidth = DIALOG_WIDTH)
+
+A question titled `title`, with `note` - what is at stake: a string, or a
+vector of rows, one fact to a row, see [`notetext`](@ref) - drawn quietly under
+it, wrapped rather than cut at the width. `""` for none; it is not optional
+only because `keys` follows it.
+
+  * `keys`     one string for each answer, every key that gives it (`"yY"`, so
+               shift does not matter); more than one is how a question offers
+               the thing you would rather do than say yes. [`answer`](@ref)
+               says which was pressed
+  * `hint`     the key hints under the box. Name the answering keys in it: they
+               are the only ones that do anything, and nothing else on screen
+               says what they are
+  * `maxwidth` the widest the box is drawn, however wide the screen
 """
-Confirm(title, notes, keys::AbstractVector = ["yY"];
-        hint::AbstractString = "y confirms · any other key cancels", maxwidth::Int = 76) =
-    Confirm(String(title), noterows(notes), String(hint), String[String(k) for k in keys],
+Confirm(title, note, keys::AbstractVector = ["yY"];
+        hint::AbstractString = CONFIRM_HINT, maxwidth::Int = DIALOG_WIDTH) =
+    Confirm(String(title), notetext(note), String(hint), String[String(k) for k in keys],
             maxwidth)
 
 function render(c::Confirm, w::Int, h::Int)
     b = dialogbox(w; width = c.maxwidth)
     out = [b.head(c.title)]
-    for n in c.notes, l in awraplines(n, b.iw)
-        push!(out, b.row(l, CHROME[].quiet))
+    for l in (isempty(c.note) ? String[] : awraplines(c.note, b.iw))
+        push!(out, b.row(l, b.chrome.quiet))
     end
     push!(out, b.foot())
     push!(out, b.hint(c.hint))

@@ -12,13 +12,19 @@
 # characters are a problem in the other direction: a buffer containing `{` is
 # text somebody typed, and markup measurement counts it as a tag.
 #
-# All of it is exported, because a host laying a widget out beside something
-# else has the same problem one step out: `amid` for a name in a fixed column,
-# `awrap` for a paragraph beside a box. They are what a host would otherwise
-# write again.
-#
-"Matches a CSI colour sequence or an OSC 8 hyperlink - what is in a string and
-takes no columns."
+# The functions are exported, because a host laying a widget out beside
+# something else has the same problem one step out: `amid` for a name in a fixed
+# column, `awrap` for a paragraph beside a box. They are what a host would
+# otherwise write again. `ESCAPE` is public and not exported, being a name a
+# host is likely to have a constant of already.
+
+"""
+    ESCAPE
+
+Matches a CSI colour sequence or an OSC 8 hyperlink at the start of a string -
+what is in a string and takes no columns. `match(ESCAPE, SubString(s, i))` is
+how every function here steps over one.
+"""
 const ESCAPE = r"^(?:\e\[[0-9;]*[A-Za-z]|\e\][^\e]*\e\\)"
 
 "The OSC 8 that ends a hyperlink: the same sequence with no url in it."
@@ -124,7 +130,10 @@ function atail(s::AbstractString, w::Int)
     String(cs[i:end])
 end
 
-"""Fit to `w` display columns by eliding in the *middle*, two thirds of the room
+"""
+    amid(s, w) -> String
+
+Fit to `w` display columns by eliding in the *middle*, two thirds of the room
 to the head and one third to the tail.
 
 Names in a fixed column agree at the front and differ at the end far more often
@@ -152,7 +161,10 @@ function amid(s::AbstractString, w::Int)
     string(ahead(s, head), "\u2026", atail(s, keep - head))
 end
 
-"""Wrap to `w` display columns, preserving escapes and breaking at spaces.
+"""
+    awrap(s, w) -> Vector{String}
+
+Wrap to `w` display columns, preserving escapes and breaking at spaces.
 
 Two things make this more than a chunking loop.
 

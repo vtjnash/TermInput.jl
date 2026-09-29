@@ -6,10 +6,17 @@
 # widget that insisted on its own would be a widget you cannot put in the
 # program you are writing.
 
-"""What a widget did with a key.
+"""
+    ACTIONS
+
+What `handle!` answers, for what a widget did with a key.
 
   * `:ok`         it used the key, and the frame should be drawn again
   * `:unhandled`  not a key this widget uses, so it is the host's
+
+[`click!`](@ref), the mouse, answers one more - `:pick`, for a double click on
+an option, which is the one gesture that is not a key and has to be decided
+about all the same.
 
 Two values, and the second is the one the design turns on. A text box holds
 text and knows how to change it. It does not know what *finishing* means -
@@ -25,7 +32,10 @@ callback table to register with, because there is nothing to register with it.
 """
 const ACTIONS = (:ok, :unhandled)
 
-"""A small multi-line text area.
+"""
+    TextArea
+
+A small multi-line text area.
 
 Enough to write a comment, a commit message or a review without leaving the
 program - insert, backspace, the arrows, home and end, and the readline keys
@@ -36,7 +46,7 @@ REPL binds to the same move. `^o` does it too, because a terminal that treats
 Option as a compose key sends no Meta at all and would leave the editor
 unreachable.
 
-    ta = TextArea("Comment", "on managers.jl:544")
+    ta = TextArea("Comment", "on src/parse.jl:42")
     print(render(ta, 80, 24))
     if handle!(ta, key) === :unhandled      # not an edit, so it is yours
         key == 19 && post(submission(ta))   # ...and this is what `^s` means
@@ -45,7 +55,8 @@ unreachable.
 Fields worth setting after construction: `status` is a line the footer shows
 instead of the key hints - a host's answer to what just happened, cleared by the
 next keystroke - and `hint` is those key hints, which a host has to add its own
-keys to, since the widget does not know what they are.
+keys to, since the widget does not know what they are. `focused` is whether the
+cursor is drawn; see the constructor.
 """
 mutable struct TextArea
     title::String
@@ -58,7 +69,10 @@ mutable struct TextArea
     focused::Bool            # does it have the keyboard? see `render`
 end
 
-"""The key hints under a text area: the keys it actually owns, and no others.
+"""
+    TEXTAREA_HINT
+
+The key hints under a text area: the keys it actually owns, and no others.
 
 How to finish and how to give up are not here because they are not the widget's
 - a host that has bound them has to say so, which is what `hint` is for.
@@ -66,25 +80,45 @@ How to finish and how to give up are not here because they are not the widget's
 const TEXTAREA_HINT = "⌥e/^o \$EDITOR · ^w word · ^a/^e line · ^y yank"
 
 """
-    TextArea(title, note = ""; initial, hint, maxwidth, focused)
+    TextArea(title, note = ""; initial = "", hint = TEXTAREA_HINT, maxwidth = 100,
+             focused = true)
 
-`initial` is what is already written - a draft being resumed, a template - and
-the cursor starts at the end of it. How the terminal is handed back while
-`\$EDITOR` runs is not the widget's: it is given with the key, to
-[`handle!`](@ref).
+A composer titled `title`, with `note` - what it is about, a line or several:
+a string, or a vector of rows, see [`notetext`](@ref) - drawn quietly under the
+title.
+
+  * `initial`  what is already written - a draft being resumed, a template -
+               with the cursor at the end of it
+  * `hint`     the key hints under the box; a host that binds keys of its own
+               over the widget's says so here
+  * `maxwidth` the widest the box is drawn, however wide the screen. Wider than
+               [`DIALOG_WIDTH`](@ref), because this is somewhere to write a
+               paragraph rather than a question to answer
+  * `focused`  whether the cursor is drawn: `false` while a host has the
+               keyboard somewhere else on the same screen, so that two things
+               drawn side by side do not both look as if they have it
+
+How the terminal is handed back while `\$EDITOR` runs is not the widget's: it is
+given with the key, to [`handle!`](@ref).
 """
 TextArea(title, note = ""; initial::AbstractString = "",
          hint::AbstractString = TEXTAREA_HINT, maxwidth::Int = 100,
          focused::Bool = true) =
-    TextArea(String(title), String(note), TextBuffer(initial), 1, "", String(hint),
+    TextArea(String(title), notetext(note), TextBuffer(initial), 1, "", String(hint),
              maxwidth, focused)
 
 text(v::TextArea) = text(v.buf)
 
-"""A paste, as the text it is - see [`paste!(::TextBuffer, ::AbstractString)`](@ref)."""
+"""
+    paste!(v::TextArea, s) -> TextArea
+
+A paste, as the text it is - see [`paste!(::TextBuffer, ::AbstractString)`](@ref)."""
 paste!(v::TextArea, s::AbstractString) = (paste!(v.buf, s); v)
 
-"""The text with the whitespace round it taken off - what a host takes when it
+"""
+    submission(widget) -> String
+
+The text with the whitespace round it taken off - what a host takes when it
 decides the widget is finished.
 
 A convenience and not a rule: somebody who has finished typing has almost always
@@ -94,7 +128,11 @@ stands.
 """
 submission(v) = String(strip(text(v)))
 
-"""Is there anything in here worth not throwing away?
+"""
+    isblank(widget) -> Bool
+
+Is there anything in here worth not throwing away? For a `TextArea` or a
+`LineInput`, and the `TextBuffer` under either.
 
 What a host asks when escape arrives, and before it submits. Words that were
 typed and are nowhere else are the one thing in a program worth a confirmation,
@@ -118,17 +156,16 @@ function render(v::TextArea, w::Int, h::Int)
 
     out = [b.head(v.title)]
     for l in awraplines(v.note, b.iw)
-        push!(out, b.row(l, CHROME[].quiet))
+        push!(out, b.row(l, b.chrome.quiet))
     end
     push!(out, b.row(""))
     for i in v.top:(v.top + bh - 1)
         line = i <= length(rows) ? rows[i] : ""
         # No cursor while the keyboard is somewhere else. A host that draws this
-        # beside something else - the browser this was split out of draws a
-        # composer next to the diff it is about - has two things on screen and
-        # one of them has the keys; two cursors would say neither does. `focused`
-        # defaults to true, so a widget that is the only thing on screen, which
-        # is every other use of this, never has to say so.
+        # beside something else - a composer next to the diff it is about - has
+        # two things on screen and one of them has the keys; two cursors would
+        # say neither does. `focused` defaults to true, so a widget that is the
+        # only thing on screen never has to say so.
         i == crow && v.focused && (line = drawcursor(line, ccol))
         push!(out, b.row(line))
     end
@@ -171,8 +208,10 @@ end
 """
     drawfield(line, col, w) -> String
 
-A line in `w` columns with the cursor drawn on it, scrolled sideways so the
-cursor is on screen.
+A line in `w` columns with the cursor drawn on it at character column `col`,
+scrolled sideways so the cursor is on screen. What a `LineInput` draws its field
+with, for a host that draws a field of its own - a search typed into a status
+line - and wants it to behave the same.
 
 A `LineInput` and a `Choice`'s query are one row, and the box cuts a line
 longer than that at its end - which is where the cursor is while typing. So a

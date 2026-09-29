@@ -7,7 +7,10 @@
 # a way to stop being the program that owns the terminal, which is a problem
 # every TUI has and none of them has anywhere to put.
 
-"""The escape sequences that turn mouse reporting on and off.
+"""
+    mouse_reporting(on) -> String
+
+The escape sequences that turn mouse reporting on and off.
 
 `1006` asks for SGR coordinates, without which columns past 223 are
 unreportable; `1002` reports presses, releases and motion *while a button is
@@ -20,7 +23,10 @@ strings in step with this one.
 """
 mouse_reporting(on::Bool) = on ? "\e[?1006h\e[?1002h" : "\e[?1002l\e[?1006l"
 
-"""The escape sequences that turn bracketed paste on and off.
+"""
+    bracketed_paste(on) -> String
+
+The escape sequences that turn bracketed paste on and off.
 
 With it on, a terminal sends a paste between `ESC [ 200 ~` and `ESC [ 201 ~`
 instead of as keys, so a host can take it as text: without it a pasted `q` is

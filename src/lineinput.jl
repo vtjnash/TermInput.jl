@@ -10,7 +10,10 @@
 # program that reached for stdin here would race its own reader task for the
 # keystrokes.
 
-"""Ask for one line of text.
+"""
+    LineInput
+
+Ask for one line of text.
 
     li = LineInput("Snooze until", "a date, or a number of days")
     print(render(li, 80, 24))
@@ -33,7 +36,10 @@ mutable struct LineInput
     maxwidth::Int
 end
 
-"""The key hints under a line input: the keys it actually owns, and no others.
+"""
+    LINEINPUT_HINT
+
+The key hints under a line input: the keys it actually owns, and no others.
 
 How to accept and how to give up are not here because they are not the widget's
 - a host that has bound them has to say so, which is what `hint` is for.
@@ -41,36 +47,64 @@ How to accept and how to give up are not here because they are not the widget's
 const LINEINPUT_HINT = "^w word · ^a/^e line · ^y yank"
 
 """
-    LineInput(title, note = ""; initial, hint, maxwidth)
+    LineInput(title, note = ""; initial = "", hint = LINEINPUT_HINT,
+              maxwidth = DIALOG_WIDTH)
+
+A field titled `title`, with `note` - what the answer is for, or what shape it
+takes: a string, or a vector of rows, see [`notetext`](@ref) - drawn quietly
+between the title and the field.
+
+  * `initial`  what the field starts with, the cursor after it: a value that is
+               usually a small edit of something the host already knows is
+               faster to correct than to type. As one line, see [`oneline`](@ref)
+  * `hint`     the key hints under the box; how to accept and how to give up
+               are the host's, and a host that has bound them says so here
+  * `maxwidth` the widest the box is drawn, however wide the screen
+
+`status`, a line shown instead of the hint until the next key, and `hint` are
+fields a host may set afterwards, as on a [`TextArea`](@ref).
 """
 LineInput(title, note = ""; initial::AbstractString = "",
-          hint::AbstractString = LINEINPUT_HINT, maxwidth::Int = 100) =
-    LineInput(String(title), String(note), TextBuffer(oneline(initial)), "",
+          hint::AbstractString = LINEINPUT_HINT, maxwidth::Int = DIALOG_WIDTH) =
+    LineInput(String(title), notetext(note), TextBuffer(oneline(initial)), "",
               String(hint), maxwidth)
 
-"""Whatever arrived, as one line. A newline in a one-row field is not a
-character to draw: the frame is clamped by *element*, so one element holding a
-newline prints as two rows, the screen scrolls, and every mouse report after it
-names a row that has moved."""
+"""
+    oneline(s) -> String
+
+Whatever arrived, as one line: each line break - `\\r\\n`, `\\r` or `\\n` - a
+space. A newline in a one-row field is not a character to draw: the frame is
+clamped by *element*, so one element holding a newline prints as two rows, the
+screen scrolls, and every mouse report after it names a row that has moved.
+"""
 oneline(s::AbstractString) = replace(replace(String(s), "\r\n" => " "), '\n' => ' ', '\r' => ' ')
 
 text(v::LineInput) = text(v.buf)
 
-"""A paste, as one line: the line breaks inside it become spaces and the one
+"""
+    paste!(v::LineInput, s) -> LineInput
+
+A paste, as one line: the line breaks inside it become spaces and the one
 it ends on - a copied line nearly always carries it - goes."""
 paste!(v::LineInput, s::AbstractString) =
     (paste!(v.buf, oneline(rstrip(String(s), ('\r', '\n')))); v)
 isblank(v::LineInput) = isblank(v.buf)
 
-"Where the cursor is, as a column in the line. 1 is before the first character."
+"""
+    column(v::LineInput) -> Int
+
+Where the cursor is, as a character column in the line: 1 is before the first
+character. With [`text`](@ref), what a host that draws the field itself hands
+[`drawfield`](@ref).
+"""
 column(v::LineInput) = v.buf.col
 
 function render(v::LineInput, w::Int, h::Int)
     b = dialogbox(w; width = v.maxwidth)
     line = curline(v.buf)
-    out = [b.top(), b.row(v.title, CHROME[].strong), b.row("")]
+    out = [b.top(), b.row(v.title, b.chrome.strong), b.row("")]
     for l in awraplines(v.note, b.iw)
-        push!(out, b.row(l, CHROME[].quiet))
+        push!(out, b.row(l, b.chrome.quiet))
     end
     push!(out, b.row(string("> ", drawfield(line, v.buf.col, b.iw - 2))))
     push!(out, b.foot())

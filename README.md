@@ -13,7 +13,7 @@ a string or an option. This is that, for a terminal.
 using TermInput
 import TermInput: render, handle!, text
 
-ta = TextArea("Comment", "on managers.jl:544")
+ta = TextArea("Comment", "on src/parse.jl:42")
 print(render(ta, 80, 24))               # `h` rows of exactly `w` columns
 if handle!(ta, key) === :unhandled      # not an edit, so it is yours
     key == 19 && post(submission(ta))   # ...and this is what `^s` means
@@ -42,7 +42,7 @@ by reading.
 
 `picked` and `answer` are exported. `click!`, and a `Choice`'s `query`,
 `query!`, `selected` and `matches`, are names a host is likely to have already,
-so they are imported by name the way `render` and `handle!` are.
+so they are public and imported by name the way `render` and `handle!` are.
 
 `click!(c, kind, x, y, at; window)` is the mouse, against where the last
 `render` put the rows: a press moves the cursor, the wheel moves it three, a
@@ -184,17 +184,54 @@ The last row is the one that decides the others: a widget cannot have a cursor
 until something can tell Left from Escape-then-`[`-then-`D`, and this one takes
 a key code from a host that has already done that.
 
+## What is exported, and what is only public
+
+Exported is what a host driving a widget writes on every call, under names
+specific enough that it is unlikely to have them already: the four widgets and
+their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
+`TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
+mouse and bracketed paste, the measuring (`awidth`, `astrip`, `afit`, `apad`,
+`amid`, `awrap`), and the key vocabulary.
+
+Public and not exported is the rest of the API, which is either a name a host
+is likely to have already or one it uses once, where it sets a widget up:
+
+* the widget protocol - `render`, `handle!`, `text`, `paste!`, `click!` - and a
+  `Choice`'s `query`, `query!`, `selected` and `matches`
+* `TextBuffer`'s operations - `settext!`, `curline`, `move!`, `newline!`,
+  `insertblock!`, `backspace!`, `deletechar!`, `killline!`, `killtostart!`,
+  `deleteword!`, `killwordforward!`, `kill!`, `yank!`, `transpose!`,
+  `wordstart`, `wordend`, `bufferrows`
+* the box - `dialogbox`, `centred`, `boxstyle`, `CHROME`, `DIALOG_WIDTH` - and
+  what a host drawing a field or a list of its own shares with the widgets:
+  `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
+  `ESCAPE`
+* `ACTIONS`, which is what `handle!` answers
+
+```julia
+import TermInput: render, handle!, text
+```
+
+`public` is Julia 1.11's; on 1.10 the same names are there, and simply not
+marked.
+
 ## Configuration
+
+Every widget is `Widget(title, note, ...)`. `note` is what is said under the
+title, a string or a vector of rows (`notetext`), and is optional where nothing
+follows it. Every widget has a `hint` - the keys it owns, which a host adds its
+own to - and a `maxwidth`, `DIALOG_WIDTH` but for the `TextArea`.
 
 | | |
 |---|---|
-| `TextArea(title, note; initial, hint, maxwidth, focused)` | the composer |
+| `TextArea(title, note = ""; initial, hint, maxwidth, focused)` | the composer, `TEXTAREA_HINT` and 100 columns by default |
 | `handle!(ta, k; suspend)` | how the terminal is handed back while `$EDITOR` runs |
-| `LineInput(title, note; initial, hint, maxwidth)` | one line in a box |
-| `Choice(title, note, labels; numbered, hint, maxwidth)` | one of a list, narrowed by a `LineInput` at its head; `picked(c, k)` says which option `↵` or a digit picks, and `click!(c, kind, x, y, at; window)` is the mouse |
-| `Confirm(title, notes, keys; hint, maxwidth)` | a question only named keys answer; `answer(c, k)` is which, 0 for no |
+| `LineInput(title, note = ""; initial, hint, maxwidth)` | one line in a box, `LINEINPUT_HINT` |
+| `Choice(title, note, labels; numbered, hint, maxwidth)` | one of a list, narrowed by a `LineInput` at its head, `CHOICE_HINT`; `picked(c, k)` says which option `↵` or a digit picks, and `click!(c, kind, x, y, at; window)` is the mouse |
+| `Confirm(title, note, keys = ["yY"]; hint, maxwidth)` | a question only named keys answer, `CONFIRM_HINT`; `answer(c, k)` is which, 0 for no |
 | `listwindow(hs, sel, top, inner)` | the rows of a list, `hs[i]` lines each, that fit a box with the cursor's whole |
-| `v.status` | a line the footer shows instead of the hints, cleared by the next key |
+| `v.status` | a line the footer shows instead of the hints, cleared by the next key; not on a `Confirm`, which the next key ends |
+| `ta.focused` | whether a `TextArea` draws its cursor. Only there, because it is the one widget a host draws beside something else; a dialog is always the thing that has the keyboard |
 | `v.hint` | those hints, which name only the keys the widget owns; a host has to add its own |
 | `isblank(v)` | whether there is anything in it - what to ask before deciding what escape costs, or whether an empty one may be sent |
 | `TERM_THEME[].box` | Term's, and the box these are drawn in |

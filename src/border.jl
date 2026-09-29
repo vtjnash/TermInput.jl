@@ -18,7 +18,10 @@
 import Term
 import Term.Boxes: BOXES
 
-"""The box style to draw with, following Term's theme unless told otherwise.
+"""
+    boxstyle() -> Term.Boxes.Box
+
+The box style to draw with, following Term's theme unless told otherwise.
 
 The theme's box name, or `ROUNDED` if it names one that is not there - a widget
 that throws because somebody set an unknown box is a worse answer than a widget
@@ -26,7 +29,11 @@ with a different corner.
 """
 boxstyle() = get(BOXES, Term.TERM_THEME[].box, BOXES.ROUNDED)
 
-"""The three weights the chrome of a widget is drawn in, for a host to set.
+"""
+    CHROME[] = (strong = ..., quiet = ..., focus = ..., reset = ...)
+
+The four weights the chrome of a widget is drawn in, for a host to set: three
+kinds of emphasis and what ends them.
 
 The characters come from Term's theme (`boxstyle` above); these are what they
 are *painted* with, and they are a `Ref` for the same reason the box is a
@@ -50,27 +57,44 @@ and a host that turned its colours off would otherwise lose it.
 const CHROME = Ref((strong = "\e[1m", quiet = "\e[2m", focus = "\e[7m", reset = "\e[0m"))
 
 """
-    dialogbox(w; width = 76, box = boxstyle()) -> NamedTuple
+    DIALOG_WIDTH
 
-The box a widget is drawn in: how wide it is, and the five kinds of row in it.
+The widest a dialog is drawn, however wide the screen: the default `maxwidth` of
+a `LineInput`, a `Choice` and a `Confirm`, and of [`dialogbox`](@ref) itself.
 
-Several widgets draw the same bordered box, and a box that is 76 columns wide
-in one of them and 72 in the other is a box somebody has to keep in step by eye.
-
-  * `head(title)` the top edge with a title written into it
-  * `top()`       the same edge with nothing in it, for a widget whose title is
-                  a row of its own
-  * `row(s, sgr)` one line inside the box, padded to the full inner width
-  * `foot()`      the bottom edge
-  * `hint(s)`     the dim line *under* the box, which is outside the border
-                  because it is about the keys and not about the question
-
-`width` is the widest the box may be; it is narrower when the screen is. The
-fields `box`, `pad` and `iw` are the box's own width, the left margin that
-centres it, and the columns available inside it. `chrome` is the three weights
-it is painted in, `CHROME[]` unless a caller says otherwise.
+Several widgets draw the same bordered box, and a box that is 76 columns wide in
+one of them and 72 in the other is a box somebody has to keep in step by eye. A
+`TextArea` is the one exception, and wider on purpose: it is somewhere to write
+a paragraph, not a question to answer.
 """
-function dialogbox(w::Int; width::Int = 76, box = boxstyle(), chrome = CHROME[])
+const DIALOG_WIDTH = 76
+
+"""
+    dialogbox(w; width = DIALOG_WIDTH, box = boxstyle(), chrome = CHROME[]) -> NamedTuple
+
+The box a widget is drawn in, on a screen `w` columns wide: how wide it is, and
+the five kinds of row in it.
+
+  * `head(title)`        the top edge with a title written into it
+  * `top()`              the same edge with nothing in it, for a widget whose
+                         title is a row of its own
+  * `row(s, style = "")` one line inside the box, in `style`, padded to the full
+                         inner width
+  * `foot()`             the bottom edge
+  * `hint(s)`            the dim line *under* the box, which is outside the
+                         border because it is about the keys and not about the
+                         question
+
+`width` is the widest the box may be; it is narrower when the screen is. `box`
+is the box style its characters come from, and `chrome` the weights it is
+painted in.
+
+The fields `bw`, `pad` and `iw` are the box's own width, the left margin that
+centres it, and the columns available inside it. `chrome` is the weights it was
+drawn with, for the `style` a caller gives its rows: a caller that takes them
+from here rather than from `CHROME[]` paints the rows in what the border was.
+"""
+function dialogbox(w::Int; width::Int = DIALOG_WIDTH, box = boxstyle(), chrome = CHROME[])
     bw = min(w - 4, width)
     pad = (w - bw) ÷ 2
     iw = bw - 4
@@ -87,8 +111,8 @@ function dialogbox(w::Int; width::Int = 76, box = boxstyle(), chrome = CHROME[])
     top() = string(" "^pad, D, tl, string(tm)^max(0, bw - 2), tr, R)
     foot() = string(" "^pad, D, bl, string(bm)^max(0, bw - 2), br, R)
     hint(s) = string(" "^pad, D, afit(s, bw), R)
-    (box = bw, pad = pad, iw = iw, row = row, head = head, top = top,
-     foot = foot, hint = hint)
+    (bw = bw, pad = pad, iw = iw, chrome = chrome, row = row, head = head,
+     top = top, foot = foot, hint = hint)
 end
 
 """
@@ -104,3 +128,14 @@ function centred(out::Vector{String}, w::Int, h::Int)
     while length(all) < h; push!(all, " "^w); end
     join([apad(l, w) for l in all[1:h]], "\n")
 end
+
+"""
+    notetext(note) -> String
+
+What a widget says under its title, as one string with a row to each line: a
+string as it is, or a vector of rows joined, the empty ones left out - so a
+caller can write a row that only sometimes has something in it as `""` rather
+than building the list conditionally. Every widget takes its `note` this way.
+"""
+notetext(s::AbstractString) = String(s)
+notetext(v::AbstractVector) = join((String(r) for r in v if !isempty(r)), '\n')

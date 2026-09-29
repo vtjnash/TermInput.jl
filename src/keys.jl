@@ -28,11 +28,23 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
 # Readline's editing keys, by the control bytes they arrive as. Named because a
 # `handle!` full of bare integers is a table nobody can read: `k == C_W` is the
 # key, `k == 23` is a number that happens to be it.
-const C_A, C_D, C_E, C_K, C_S, C_U, C_W, C_O = 1, 4, 5, 11, 19, 21, 23, 15
-const C_R = 18
-const C_B, C_F, C_G, C_N, C_P, C_T, C_Y = 2, 6, 7, 14, 16, 20, 25
+const C_A, C_B, C_D, C_E, C_F, C_G, C_K = 1, 2, 4, 5, 6, 7, 11
+const C_N, C_O, C_P, C_R, C_S, C_T, C_U = 14, 15, 16, 18, 19, 20, 21
+const C_W, C_Y = 23, 25
 
-"""Where the keys that are not characters start.
+"""
+    C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U, C_W, C_Y
+
+The control keys readline binds, as the byte each arrives as: `C_W == 23` is
+`^w`. Only the ones some widget binds, or hands back and a host is likely to
+bind, have a name - `^s` to finish, `^g` to abort, `^r` for a host's own.
+"""
+C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U, C_W, C_Y
+
+"""
+    K_BASE
+
+Where the keys that are not characters start; see [`K_LEFT`](@ref) for them.
 
 **A key code below this is the bytes that arrived, packed big-endian.** One byte
 is `0x00`-`0xFF`, so `k == Int('j')`, `k == 13` and `k == 27` are what they have
@@ -70,20 +82,45 @@ const K_HOME  = K_BASE + 5
 const K_END   = K_BASE + 6
 const K_PGUP  = K_BASE + 7
 const K_PGDN  = K_BASE + 8
-const K_STAB  = K_BASE + 9     # Shift-Tab, CSI Z
+const K_STAB  = K_BASE + 9
 const K_WORD_LEFT  = K_BASE + 10
 const K_WORD_RIGHT = K_BASE + 11
-const K_WORD_BACK  = K_BASE + 12    # delete the word before the cursor
-const K_EDIT       = K_BASE + 13    # Alt-e, as the REPL binds it
-const K_WORD_KILL  = K_BASE + 16    # Alt-d: the word in front of the cursor
-const K_SUP        = K_BASE + 14    # Shift-Up and Shift-Down, which are the
-const K_SDOWN      = K_BASE + 15    # arrows' own keys and not modifiers here:
-                                    # only the detail pane does anything with
-                                    # the shift, and a view that has no
-                                    # selection to extend passes them through
-                                    # `unshift`
+const K_WORD_BACK  = K_BASE + 12
+const K_EDIT       = K_BASE + 13
+const K_SUP        = K_BASE + 14
+const K_SDOWN      = K_BASE + 15
+const K_WORD_KILL  = K_BASE + 16
 
-"""A key that stands for something someone meant to type.
+"""
+    K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP, K_PGDN, K_STAB,
+    K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_WORD_KILL, K_EDIT, K_SUP, K_SDOWN
+
+The keys that are not characters, each a code at or above [`K_BASE`](@ref), so
+that no sequence of bytes somebody typed can be one of them.
+
+| code | key |
+|---|---|
+| `K_LEFT` `K_RIGHT` `K_UP` `K_DOWN` | the arrows |
+| `K_DEL` | Delete, the key that deletes forwards |
+| `K_HOME` `K_END` `K_PGUP` `K_PGDN` | Home, End, Page Up, Page Down |
+| `K_STAB` | Shift-Tab (`CSI Z`) |
+| `K_WORD_LEFT` `K_WORD_RIGHT` | `⌥b`/`⌥f`, and the ctrl- or alt-arrows |
+| `K_WORD_BACK` | `⌥⌫`: delete the word before the cursor |
+| `K_WORD_KILL` | `⌥d`: delete the word in front of the cursor |
+| `K_EDIT` | `⌥e`, hand the text to `\$EDITOR`, as the Julia REPL binds it |
+| `K_SUP` `K_SDOWN` | Shift-Up and Shift-Down |
+
+Shift-Up and Shift-Down are keys of their own rather than an arrow with a
+modifier, for a view that has a selection to extend with them. One that has
+none passes them through [`unshift`](@ref), and every widget here does.
+"""
+K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP, K_PGDN, K_STAB,
+K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_WORD_KILL, K_EDIT, K_SUP, K_SDOWN
+
+"""
+    printable(k) -> Bool
+
+A key that stands for something someone meant to type.
 
 Anything below [`K_BASE`](@ref) that is not a control byte, which includes bytes
 that are not a character on their own. That is deliberate: they are what was
@@ -91,7 +128,10 @@ typed or pasted, and [`keychar`](@ref) can hand every one of them back.
 """
 printable(k::Int) = (k >= 32 && k != 127 && k < K_BASE)
 
-"""The bytes of `k` as the `Char` they are, however malformed.
+"""
+    keychar(k) -> Char
+
+The bytes of `k` as the `Char` they are, however malformed.
 
 Their count is their magnitude - a two-byte sequence starts at `0xC080`, a three
 at `0xE08080`, a four at `0xF0808080` - and a `Char` holds them left-aligned,
@@ -102,13 +142,19 @@ function keychar(k::Int)
     reinterpret(Char, UInt32(k) << (8 * n))
 end
 
-"""The key code for `c`: its bytes, packed. The inverse of [`keychar`](@ref),
+"""
+    keycode(c) -> Int
+
+The key code for `c`: its bytes, packed. The inverse of [`keychar`](@ref),
 for a caller with a character in hand and a key stream to put it into.
 """
 keycode(c::Char) =
     Int(reinterpret(UInt32, c) >> (8 * (4 - ncodeunits(c))))
 
-"""Shift-Up and Shift-Down for a view with no selection to extend: the plain
+"""
+    unshift(k) -> Int
+
+Shift-Up and Shift-Down for a view with no selection to extend: the plain
 arrow. A key drawn on the arrow that does nothing at all reads as a terminal
 that has stopped responding.
 """

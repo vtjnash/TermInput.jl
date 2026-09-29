@@ -13,7 +13,7 @@ a string or an option. This is that, for a terminal.
     using TermInput
     import TermInput: render, handle!, text
 
-    ta = TextArea("Comment", "on managers.jl:544")
+    ta = TextArea("Comment", "on src/parse.jl:42")
     print(render(ta, 80, 24))               # `h` rows of exactly `w` columns
     if handle!(ta, key) === :unhandled      # not an edit, so it is yours
         key == 19 && post(submission(ta))   # ...and this is what `^s` means
@@ -58,14 +58,13 @@ import Term
 import REPL
 import InteractiveUtils
 
-export ESCAPE, awidth, astrip, afit, apad, amid, awrap
-export TextBuffer, settext!, curline, move!, newline!, insertblock!, paste!, backspace!,
-       deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
-       kill!, yank!, transpose!, word_start, word_end, bufferrows, isblank
-export boxstyle, dialogbox, centred, CHROME
+# Exported: what a host driving a widget writes on every call, with names
+# specific enough that it is unlikely to have them already.
+export awidth, astrip, afit, apad, amid, awrap
+export TextBuffer
 export suspend, compose_external, mouse_reporting, bracketed_paste
-export TextArea, LineInput, ACTIONS, submission, TEXTAREA_HINT, LINEINPUT_HINT
-export Choice, Confirm, listwindow, picked, answer
+export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer,
+       listwindow, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
 # The key vocabulary is a host's to produce and every widget's to bind, so it is
 # re-exported rather than left behind the submodule: a program that reads a
 # keystroke has to be able to say `K_LEFT` without knowing where it lives.
@@ -75,6 +74,19 @@ export K_BASE, K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP,
        K_EDIT, K_SUP, K_SDOWN, printable, keychar, keycode, unshift
 export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
        C_W, C_Y
+
+# Public and not exported: API, but a name a host is likely to have already -
+# `render`, `text`, `move!` - or one it uses once, where it sets a widget up,
+# rather than on every call. `import TermInput: render, handle!` where they are
+# wanted. `public` is 1.11's, so it is parsed only where it exists.
+@static if VERSION >= v"1.11.0-DEV.469"
+    eval(Meta.parse("""public render, handle!, text, paste!, click!, column,
+        query, query!, selected, matches, doubled, DOUBLECLICK, ACTIONS,
+        ESCAPE, oneline, notetext, drawfield, bufferrows, settext!, curline, move!,
+        newline!, insertblock!, backspace!, deletechar!, killline!,
+        killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
+        wordstart, wordend, boxstyle, dialogbox, centred, CHROME, DIALOG_WIDTH"""))
+end
 
 include("ansi.jl")
 include("keys.jl")
@@ -92,19 +104,22 @@ include("choice.jl")
 
 The whole frame: `h` rows of exactly `w` display columns, joined by newlines and
 with no trailing one. Pure - the same widget and the same size give the same
-string.
+string - bar that a `Choice` notes where it put its rows, for [`click!`](@ref).
 
-Not exported, because `render` is a name a host is likely to have already;
-`import TermInput: render` where it is not. The same goes for `click!` and a
-`Choice`'s `query`, `query!`, `selected` and `matches`.
+Public and not exported, because `render` is a name a host is likely to have
+already; `import TermInput: render` where it is not.
 """
 render
 
 """
     handle!(widget, key) -> Symbol
 
-Hand one key code to a widget - see [`ACTIONS`](@ref) for what comes back, and
-`Keys` for the codes. Not exported, for the same reason as [`render`](@ref).
+Hand one key code to a `TextArea`, a `LineInput` or a `Choice` - see
+[`ACTIONS`](@ref) for what comes back, and `Keys` for the codes. A `Confirm`
+has none: any key ends a question, so its key goes to [`answer`](@ref), which
+says what it answered.
+
+Public and not exported, for the same reason as [`render`](@ref).
 """
 handle!
 
@@ -113,8 +128,9 @@ handle!
 
 What is written, exactly as it is written. [`submission`](@ref) is the same with
 the whitespace round it taken off, which is usually what a host wants when it
-decides the widget is finished. Not exported, for the same reason as
-[`render`](@ref).
+decides the widget is finished.
+
+Public and not exported, for the same reason as [`render`](@ref).
 """
 text
 

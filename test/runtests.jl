@@ -11,6 +11,12 @@
 using Test
 using TermInput
 import TermInput: render, handle!, text, chunks, drawcursor, drawfield, displaycolumn
+# The public names that are not exported, as a host would import them.
+import TermInput: ESCAPE, settext!, curline, move!, newline!, insertblock!, paste!,
+    backspace!, deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
+    kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
+    centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
+    DOUBLECLICK, oneline, column
 import InteractiveUtils
 
 @testset "TermInput" begin
@@ -164,16 +170,16 @@ end
 end
 
 @testset "word motion" begin
-    @test word_start("foo bar   ", 11) == 5      # over the spaces, then the word
-    @test word_start("foo bar", 8) == 5
-    @test word_start("foo", 1) == 1              # nothing behind the cursor
-    @test word_end("foo bar", 1) == 4
-    @test word_end("  foo bar", 1) == 6          # skip leading space first
-    @test word_end("foo", 4) == 4
+    @test wordstart("foo bar   ", 11) == 5      # over the spaces, then the word
+    @test wordstart("foo bar", 8) == 5
+    @test wordstart("foo", 1) == 1              # nothing behind the cursor
+    @test wordend("foo bar", 1) == 4
+    @test wordend("  foo bar", 1) == 6          # skip leading space first
+    @test wordend("foo", 4) == 4
     # The two readline rules differ, and the difference is the point.
-    @test word_start("/usr/local/lib", 15) == 1                 # ^w: no space to stop at
-    @test word_start("/usr/local/lib", 15; alnum = true) == 12  # alt-bksp: just "lib"
-    @test word_end("foo.bar", 1; alnum = true) == 4
+    @test wordstart("/usr/local/lib", 15) == 1                 # ^w: no space to stop at
+    @test wordstart("/usr/local/lib", 15; alnum = true) == 12  # alt-bksp: just "lib"
+    @test wordend("foo.bar", 1; alnum = true) == 4
 end
 
 @testset "the editing model, with no view attached" begin
@@ -649,7 +655,15 @@ end
     n = Choice("t", "", ["one", "two"]; numbered = true)
     @test handle!(n, keycode('2')) === :unhandled && picked(n, keycode('2')) == 2
     @test picked(n, keycode('5')) == 0 && query(n) == ""
-    @test occursin("0-9 picks", render(n, 80, 24))
+    # The default hint names only the keys the widget owns: picking and
+    # escape come back, so saying what they do is the host's.
+    @test occursin(CHOICE_HINT, render(n, 80, 24))
+    @test !occursin("esc", CHOICE_HINT) && !occursin("↵", CHOICE_HINT)
+    # A status is shown instead of the hint, and the next key clears it.
+    n.status = "no labels to add"
+    @test occursin("no labels to add", render(n, 80, 24))
+    handle!(n, K_DOWN)
+    @test isempty(n.status) && occursin(CHOICE_HINT, render(n, 80, 24))
     # A paste is one line of query.
     query!(c, ""); TermInput.paste!(c, "doc\n")
     @test query(c) == "doc" && matches(c) == [2]
@@ -705,7 +719,16 @@ end
     # What a host calls to read a pick or an answer is exported with the widget.
     @test :picked in names(TermInput) && :answer in names(TermInput)
     q = Confirm("Discard?", ["", "it is nowhere else"])
-    @test q.notes == ["it is nowhere else"]
+    @test q.note == "it is nowhere else"
+    @test occursin(CONFIRM_HINT, render(q, 60, 10))
+    # Every widget takes its note the same way: a string, or rows with the
+    # empty ones left out.
+    @test Confirm("t", "a\nb").note == Confirm("t", ["a", "", "b"]).note == "a\nb"
+    @test TextArea("t", ["a", "", "b"]).note == LineInput("t", ["a", "b"]).note ==
+          Choice("t", ["a", "b"], ["x"]).note == "a\nb"
+    # The hint is a field a host may set afterwards, on every widget.
+    q.hint = "y discards it"
+    @test occursin("y discards it", render(q, 60, 10))
     @test answer(q, keycode('y')) == 1 && answer(q, keycode('Y')) == 1
     @test answer(q, 13) == 0 && answer(q, 27) == 0 && answer(q, keycode('n')) == 0
     q2 = Confirm("Quit", "a draft", ["yY", "\e"]; hint = "y quits · esc goes back")
@@ -759,13 +782,27 @@ end
     b = dialogbox(80)
     @test occursin(string(boxstyle().top.left), b.head("title"))
     @test occursin("title", astrip(b.head("title")))
-    @test awidth(b.row("x")) == b.pad + b.box
-    @test awidth(b.foot()) == b.pad + b.box
-    @test awidth(b.head("a title")) == b.pad + b.box
-    @test awidth(b.top()) == b.pad + b.box
+    @test awidth(b.row("x")) == b.pad + b.bw
+    @test awidth(b.foot()) == b.pad + b.bw
+    @test awidth(b.head("a title")) == b.pad + b.bw
+    @test awidth(b.top()) == b.pad + b.bw
     # A title too long for the edge is elided rather than pushing the corner
     # off the end of it.
-    @test awidth(b.head("t"^300)) == b.pad + b.box
+    @test awidth(b.head("t"^300)) == b.pad + b.bw
+    # The rows a widget draws are painted in the weights its border was, so a
+    # box given weights of its own is one box and not two.
+    plain = (strong = "", quiet = "", focus = "", reset = "")
+    @test dialogbox(80; chrome = plain).chrome === plain
+    old = CHROME[]
+    try
+        CHROME[] = plain
+        @test !occursin('\e', render(Confirm("t", "a note"), 60, 10))
+        # Bar the cursor, which is reverse video whatever the chrome says.
+        @test !occursin('\e', replace(render(LineInput("t", "a note"), 60, 10),
+                                       "\e[7m \e[0m" => ""))
+    finally
+        CHROME[] = old
+    end
 
     old = Term.TERM_THEME[].box
     try
@@ -914,6 +951,32 @@ end
     @test text(ta) == "a remark!"
     ta.focused = true
     @test occursin("\e[7m", render(ta, 60, 16))
+end
+
+@testset "a misspelt direction is an error, not a key that does nothing" begin
+    b = TextBuffer("abc")
+    @test_throws ArgumentError move!(b, :lft)
+    @test b.col == 4
+end
+
+@testset "every exported or public name says what it is" begin
+    # A name a host is told to import and cannot ask about is half an API.
+    # `names` lists the public names on 1.11 and the exported ones before it.
+    api = setdiff(names(TermInput), [:TermInput])
+    @test isempty(filter(n -> !Docs.hasdoc(TermInput, n), api))
+    @test isempty(filter(n -> !Docs.hasdoc(TermInput.Keys, n),
+                         setdiff(names(TermInput.Keys), [:Keys])))
+    if VERSION >= v"1.11.0-DEV.469"
+        # And the names the README tells a host to import are public.
+        for n in (:render, :handle!, :text, :click!, :query, :query!, :selected,
+                  :matches, :drawfield, :oneline, :doubled, :column)
+            @test Base.ispublic(TermInput, n)
+        end
+        # A name a host is likely to have is not pushed into its namespace.
+        for n in (:transpose!, :move!, :kill!, :yank!, :ESCAPE, :render)
+            @test !Base.isexported(TermInput, n)
+        end
+    end
 end
 
 end # testset TermInput

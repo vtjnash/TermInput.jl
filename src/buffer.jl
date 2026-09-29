@@ -12,7 +12,10 @@
 # because a wide character is one place to be, not two. The one place widths
 # matter is wrapping, which is `chunks` at the foot of this file.
 
-"""A cursor over some lines of text.
+"""
+    TextBuffer
+
+A cursor over some lines of text.
 
 `row` and `col` are 1-based, `col == 1` being before the first character of the
 line. There is always at least one line, so an empty buffer is `[""]` and not
@@ -39,10 +42,16 @@ character of rubbish at the end of every row.
 TextBuffer(s::AbstractString = "") =
     (b = TextBuffer([""], 1, 1, "", false); settext!(b, s); b)
 
-"""The whole buffer as one string, lines joined by newlines."""
+"""
+    text(b::TextBuffer) -> String
+
+The whole buffer as one string, lines joined by newlines."""
 text(b::TextBuffer) = join(b.lines, "\n")
 
-"""Replace everything, and put the cursor at the end."""
+"""
+    settext!(b, s) -> TextBuffer
+
+Replace everything, and put the cursor at the end."""
 function settext!(b::TextBuffer, s::AbstractString)
     endkill!(b)
     ls = isempty(s) ? [""] : String.(split(replace(s, "\r\n" => "\n"), "\n"))
@@ -52,7 +61,10 @@ function settext!(b::TextBuffer, s::AbstractString)
     b
 end
 
-"""Is there anything here worth not throwing away?
+"""
+    isblank(b) -> Bool
+
+Is there anything here worth not throwing away?
 
 The question a host asks before it decides whether escape needs confirming.
 Whitespace does not count: a composer opened by mistake and escaped from
@@ -60,7 +72,10 @@ immediately has a newline in it as often as not.
 """
 isblank(b::TextBuffer) = isempty(strip(text(b)))
 
-"The line the cursor is on."
+"""
+    curline(b) -> String
+
+The line the cursor is on."""
 curline(b::TextBuffer) = b.lines[b.row]
 
 """Put the cursor somewhere legal.
@@ -84,14 +99,17 @@ end
 # somebody using it as their editor. `killed` is a plain string, so a host that
 # wants a ring can keep one and set it.
 
-"""Put `s` in the kill buffer.
+"""
+    kill!(b, s; backward = false) -> TextBuffer
+
+Put `s` in the kill buffer.
 
 Joined to what is already there when the operation before this one was also a
 kill, which is what makes `^k^k^k` then `^y` give back three lines rather than
 the last one. A *backward* kill goes on the front, so that `^w^w` yanks back in
 the order it was typed rather than reversed.
 
-Every other operation clears [`killing`](@ref TextBuffer), which is what ends a
+Every other operation clears the buffer's `killing` flag, which is what ends a
 run - so the accumulating is automatic for a caller driving the buffer directly
 and needs no bookkeeping in the widget.
 """
@@ -107,7 +125,10 @@ endkill!(b::TextBuffer) = (b.killing = false; b)
 
 # --- the two word rules -----------------------------------------------------
 
-"""Column where the word before `col` starts, by one of readline's two rules.
+"""
+    wordstart(s, col; alnum = false) -> Int
+
+Column where the word before `col` starts, by one of readline's two rules.
 
 Skip whatever does not count as a word immediately behind the cursor, then the
 run that does. Which rule matters: `^w` is unix-word-rubout, delimited by
@@ -116,7 +137,7 @@ non-alphanumeric. On `/usr/local/lib` the first takes the whole path - there is
 no whitespace to stop at - and the second takes only `lib`. Both are wanted,
 which is why both keys exist, so `alnum` picks between them.
 """
-function word_start(s::AbstractString, col::Int; alnum::Bool = false)
+function wordstart(s::AbstractString, col::Int; alnum::Bool = false)
     inword(c) = alnum ? (isletter(c) || isnumeric(c)) : !isspace(c)
     cs = collect(s)
     i = min(col - 1, length(cs))
@@ -125,8 +146,12 @@ function word_start(s::AbstractString, col::Int; alnum::Bool = false)
     i + 1
 end
 
-"Column just past the word after `col`, by the same rule in the other direction."
-function word_end(s::AbstractString, col::Int; alnum::Bool = false)
+"""
+    wordend(s, col; alnum = false) -> Int
+
+Column just past the word after `col`, by the same rule in the other direction.
+"""
+function wordend(s::AbstractString, col::Int; alnum::Bool = false)
     inword(c) = alnum ? (isletter(c) || isnumeric(c)) : !isspace(c)
     cs = collect(s)
     i = max(col, 1)
@@ -141,7 +166,9 @@ end
     move!(b, where) -> TextBuffer
 
 Move the cursor. `where` is one of `:left`, `:right`, `:up`, `:down`, `:home`,
-`:end`, `:wordleft`, `:wordright`, `:bufstart`, `:bufend`.
+`:end`, `:wordleft`, `:wordright`, `:bufstart`, `:bufend`, and anything else
+is an `ArgumentError` - a misspelt direction is a bug to hear about, not a key
+that does nothing.
 
 Horizontal movement crosses line boundaries and vertical movement keeps the
 column it can - both of which are what every editor does, and both of which are
@@ -169,15 +196,17 @@ function move!(b::TextBuffer, where::Symbol)
         # At the front of a line, the word before the cursor is on the line
         # above - the same rule as `:left`, which is what makes holding the key
         # down walk backwards through a paragraph rather than stopping.
-        b.col > 1 ? (b.col = word_start(l, b.col; alnum = true)) :
+        b.col > 1 ? (b.col = wordstart(l, b.col; alnum = true)) :
         b.row > 1 && (b.row -= 1; b.col = length(b.lines[b.row]) + 1)
     elseif where === :wordright
-        b.col <= n ? (b.col = word_end(l, b.col; alnum = true)) :
+        b.col <= n ? (b.col = wordend(l, b.col; alnum = true)) :
         b.row < length(b.lines) && (b.row += 1; b.col = 1)
     elseif where === :bufstart
         b.row = 1; b.col = 1
     elseif where === :bufend
         b.row = length(b.lines); b.col = length(last(b.lines)) + 1
+    else
+        throw(ArgumentError(string("move!: no direction ", repr(where))))
     end
     clampcursor!(b)
 end
@@ -206,7 +235,10 @@ function Base.insert!(b::TextBuffer, c::AbstractChar)
     b
 end
 
-"""Split the line at the cursor, leaving the cursor at the front of the new one."""
+"""
+    newline!(b) -> TextBuffer
+
+Split the line at the cursor, leaving the cursor at the front of the new one."""
 function newline!(b::TextBuffer)
     clampcursor!(b); endkill!(b)
     head, tail = split_at_cursor(b)
@@ -286,7 +318,10 @@ function joinup!(b::TextBuffer)
     b
 end
 
-"""Delete the character before the cursor, joining lines when there is none."""
+"""
+    backspace!(b) -> TextBuffer
+
+Delete the character before the cursor, joining lines when there is none."""
 function backspace!(b::TextBuffer)
     clampcursor!(b); endkill!(b)
     l = curline(b)
@@ -299,7 +334,10 @@ function backspace!(b::TextBuffer)
     end
 end
 
-"""Delete the character under the cursor, pulling the next line up when there is
+"""
+    deletechar!(b) -> TextBuffer
+
+Delete the character under the cursor, pulling the next line up when there is
 none - which is what makes `^d` at the end of a line the inverse of `↵`."""
 function deletechar!(b::TextBuffer)
     clampcursor!(b); endkill!(b)
@@ -313,7 +351,10 @@ function deletechar!(b::TextBuffer)
     b
 end
 
-"""`^k` (kill-line): everything from the cursor to the end of the line, or - on
+"""
+    killline!(b) -> TextBuffer
+
+`^k` (kill-line): everything from the cursor to the end of the line, or - on
 an empty tail - the line break itself, which is what makes `^k^k` take a whole
 line and its newline with it."""
 function killline!(b::TextBuffer)
@@ -330,7 +371,10 @@ function killline!(b::TextBuffer)
     b
 end
 
-"""`^u` (unix-line-discard): from the cursor back to the start of the line.
+"""
+    killtostart!(b) -> TextBuffer
+
+`^u` (unix-line-discard): from the cursor back to the start of the line.
 
 Readline's rule, not zsh's - zsh binds `^u` to kill-whole-line, and the two only
 differ when the cursor is not at the end of the line, which is exactly when
@@ -350,14 +394,14 @@ end
     deleteword!(b; alnum = false) -> TextBuffer
 
 `^w` (unix-word-rubout) and `⌥⌫` (backward-kill-word): the word before the
-cursor. `alnum` picks the rule - see [`word_start`](@ref) - and at column 1
+cursor. `alnum` picks the rule - see [`wordstart`](@ref) - and at column 1
 there is no word behind the cursor on this line, so the line break is what is
 killed and the lines join, the way backspace joins them.
 """
 function deleteword!(b::TextBuffer; alnum::Bool = false)
     clampcursor!(b)
     l = curline(b)
-    ws = word_start(l, b.col; alnum = alnum)
+    ws = wordstart(l, b.col; alnum = alnum)
     if ws < b.col
         kill!(b, String(l[nextind(l, 0, ws):prevind(l, nextind(l, 0, b.col))]);
               backward = true)
@@ -382,7 +426,7 @@ word behind you and the word in front of you are separately worth removing.
 function killwordforward!(b::TextBuffer)
     clampcursor!(b)
     l, n = curline(b), length(curline(b))
-    we = word_end(l, b.col; alnum = true)
+    we = wordend(l, b.col; alnum = true)
     if we > b.col && b.col <= n
         kill!(b, String(l[nextind(l, 0, b.col):prevind(l, nextind(l, 0, we))]))
         b.lines[b.row] = string(first(l, b.col - 1), l[nextind(l, 0, we):end])
