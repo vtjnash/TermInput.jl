@@ -36,17 +36,18 @@ it draws.
 
   * `strong` a title, and a border that has the keyboard
   * `quiet`  a border that does not, and the note and hint lines around it
-  * `reset`  what ends either of them
+  * `focus`  the option under the cursor in a `Choice`
+  * `reset`  what ends any of them
 
-The defaults are what these widgets have always drawn: bold, dim, and a reset.
-A host that sets all three to `""` gets chrome with no escapes in it at all,
-which is what a program drawing plain text wants and what a pipe wants.
+The defaults are bold, dim, reverse video and a reset. A host that sets all
+four to `""` gets chrome with no escapes in it at all, which is what a program
+drawing plain text wants and what a pipe wants.
 
 Not in here: the block that marks where the cursor is in a `TextArea`. Reverse
 video there is not emphasis, it is the only thing saying where typing will go,
 and a host that turned its colours off would otherwise lose it.
 """
-const CHROME = Ref((strong = "\e[1m", quiet = "\e[2m", reset = "\e[0m"))
+const CHROME = Ref((strong = "\e[1m", quiet = "\e[2m", focus = "\e[7m", reset = "\e[0m"))
 
 """
     dialogbox(w; width = 76, box = boxstyle()) -> NamedTuple

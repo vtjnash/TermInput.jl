@@ -160,10 +160,14 @@ a key code from a host that has already done that.
 | `TextArea(title, note; initial, hint, maxwidth, focused)` | the composer |
 | `handle!(ta, k; suspend)` | how the terminal is handed back while `$EDITOR` runs |
 | `LineInput(title, note; initial, hint, maxwidth)` | one line in a box |
+| `Choice(title, note, labels; numbered, hint, maxwidth)` | one of a list, narrowed by a `LineInput` at its head; `picked(c, k)` says which option `↵` or a digit picks, and `click!(c, kind, x, y, at; window)` is the mouse |
+| `Confirm(title, notes, keys; hint, maxwidth)` | a question only named keys answer; `answer(c, k)` is which, 0 for no |
+| `listwindow(hs, sel, top, inner)` | the rows of a list, `hs[i]` lines each, that fit a box with the cursor's whole |
 | `v.status` | a line the footer shows instead of the hints, cleared by the next key |
 | `v.hint` | those hints, which name only the keys the widget owns; a host has to add its own |
 | `isblank(v)` | whether there is anything in it - what to ask before deciding what escape costs, or whether an empty one may be sent |
 | `TERM_THEME[].box` | Term's, and the box these are drawn in |
+| `CHROME[]` | the weights it is painted in: `strong`, `quiet`, `focus` (a `Choice`'s cursor) and `reset` |
 
 ## Tests
 

@@ -587,6 +587,77 @@ end
     end
 end
 
+@testset "a choice, narrowed by typing" begin
+    import TermInput: picked, answer, click!, query, query!, selected, matches, doubled
+    c = Choice("Labels", "↵ toggles one", ["bug", "docs", "performance", "build\n  under it"])
+    @test selected(c) == 1
+    @test handle!(c, K_DOWN) === :ok && selected(c) == 2
+    @test handle!(c, C_N) === :ok && handle!(c, C_P) === :ok && selected(c) == 2
+    # Typing narrows, by the lines under an option too, and goes back to the
+    # top of what is left; the query edits the way a line input does.
+    for ch in "u"; handle!(c, keycode(ch)); end
+    @test query(c) == "u" && matches(c) == [1, 4] && selected(c) == 1
+    for ch in "nder"; handle!(c, keycode(ch)); end
+    @test matches(c) == [4]
+    handle!(c, C_W)
+    @test query(c) == "" && length(matches(c)) == 4
+    query!(c, "zzz")
+    @test isempty(matches(c)) && selected(c) == 0 && picked(c, 13) == 0
+    query!(c, "")
+    # What picking means is the host's: `↵` and escape come back, and `picked`
+    # says which option the key would pick.
+    c.sel = 3
+    @test handle!(c, 13) === :unhandled && picked(c, 13) == 3
+    @test handle!(c, 27) === :unhandled && picked(c, 27) == 0
+    # An unnumbered list takes a digit as a query; a numbered one hands it back,
+    # and it picks that row, or nothing where there is none.
+    handle!(c, keycode('5')); @test query(c) == "5"
+    n = Choice("t", "", ["one", "two"]; numbered = true)
+    @test handle!(n, keycode('2')) === :unhandled && picked(n, keycode('2')) == 2
+    @test picked(n, keycode('5')) == 0 && query(n) == ""
+    @test occursin("0-9 picks", render(n, 80, 24))
+    # A paste is one line of query.
+    query!(c, ""); TermInput.paste!(c, "doc\n")
+    @test query(c) == "doc" && matches(c) == [2]
+
+    # The frame, and where it put the rows, for the mouse.
+    many = ["opt $i" * (iseven(i) ? "\n  under $i" : "") for i in 1:12]
+    m = Choice("t", "", many; numbered = true)
+    for (w, h) in ((90, 24), (80, 12), (160, 50))
+        ls = split(render(m, w, h), "\n")
+        @test length(ls) == h && all(awidth(l) == w for l in ls)
+    end
+    ls = split(astrip(render(m, 80, 50)), "\n")
+    @test m.omap[1:4] == [1, 2, 2, 3]
+    r3 = findfirst(l -> occursin("3  opt 3", l), ls)
+    @test r3 == first(m.orows) + 3
+    @test click!(m, :press, 10, r3, 1.0) === :ok && selected(m) == 3
+    @test click!(m, :press, 11, r3, 1.2) === :pick           # a double click
+    @test click!(m, :press, 10, r3, 5.0; window = 0.1) === :ok
+    @test click!(m, :press, 10, r3, 5.2; window = 0.1) === :ok   # too slow for that
+    @test click!(m, :wheeldown, 10, r3, 6.0) === :ok && selected(m) == 6
+    @test click!(m, :press, 10, first(m.boxrows) - 1, 7.0) === :unhandled
+    @test doubled((1.0, 5, 5), 6, 5, 1.4, 0.5) && !doubled((1.0, 5, 5), 7, 5, 1.4, 0.5)
+
+    # The rows of a list in a box: the cursor's row whole, and the box full.
+    @test listwindow([1, 3, 2, 1, 1], 2, 1, 3) == (2, 2, 2:2)
+    @test listwindow([1, 3, 2, 1, 1], 3, 1, 3) == (3, 3, 3:4)
+    @test listwindow([1, 1, 1], 1, 1, 10) == (1, 1, 1:3)
+end
+
+@testset "a question only named keys answer" begin
+    import TermInput: answer
+    q = Confirm("Discard?", ["", "it is nowhere else"])
+    @test q.notes == ["it is nowhere else"]
+    @test answer(q, keycode('y')) == 1 && answer(q, keycode('Y')) == 1
+    @test answer(q, 13) == 0 && answer(q, 27) == 0 && answer(q, keycode('n')) == 0
+    q2 = Confirm("Quit", "a draft", ["yY", "\e"]; hint = "y quits · esc goes back")
+    @test answer(q2, 27) == 2 && answer(q2, K_UP) == 0
+    ls = split(render(q2, 60, 10), "\n")
+    @test length(ls) == 10 && all(awidth(l) == 60 for l in ls)
+    @test any(l -> occursin("esc goes back", l), ls)
+end
+
 @testset "the two widgets differ in exactly four places" begin
     # The README carries the whole readline table, and a table is only worth
     # having if it cannot drift. Every key both widgets bind is written down

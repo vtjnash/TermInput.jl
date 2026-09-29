@@ -39,6 +39,8 @@ embeds one.
   * `suspend.jl`   handing the terminal to `\$EDITOR` and taking it back
   * `textarea.jl`  `TextArea`, the multi-line composer
   * `lineinput.jl` `LineInput`, one line in a box
+  * `choice.jl`    `Choice`, one of a list narrowed by typing, and `Confirm`,
+                   a question only named keys answer
 
 ## What Term gives it
 
@@ -62,6 +64,7 @@ export TextBuffer, settext!, curline, move!, newline!, insertblock!, paste!, bac
 export boxstyle, dialogbox, centred, CHROME
 export suspend, compose_external, mouse_reporting, bracketed_paste
 export TextArea, LineInput, ACTIONS, submission, TEXTAREA_HINT, LINEINPUT_HINT
+export Choice, Confirm, listwindow
 # The key vocabulary is a host's to produce and every widget's to bind, so it is
 # re-exported rather than left behind the submodule: a program that reads a
 # keystroke has to be able to say `K_LEFT` without knowing where it lives.
@@ -81,6 +84,7 @@ include("border.jl")
 include("suspend.jl")
 include("textarea.jl")
 include("lineinput.jl")
+include("choice.jl")
 
 """
     render(widget, w, h) -> String
