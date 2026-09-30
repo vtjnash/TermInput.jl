@@ -88,6 +88,14 @@ itself and takes none of what follows. A host that has nothing composes these.
   `REPL.TerminalMenus.readkey` returns Escape and leaves the tail to arrive
   as keys, which is Shift-Tab reading as Escape-then-`Z`. It never decides
   by the clock: a bare Escape is one with nothing already waiting behind it.
+* **`InputReader(t, events)`** is a task that reads one event each time it is
+  armed - `arm!(r)`, or `arm!(r, read)` with a read of the host's own - and puts
+  it on `events`, a `Channel` the host owns, so that whatever else wakes the
+  loop goes on the same channel and the loop waits in one place. Between an
+  event and the next `arm!` nothing is reading the terminal, which is what
+  makes `suspend` safe: a reader always in `read` would race `$EDITOR` for
+  every key. When input ends it puts an `EndEvent`, whose `why` is the error,
+  rather than leaving the loop waiting for ever; `close(r)` lets it go.
 * **`scheme_reports(on)`** asks the terminal to say whether it is dark or
   light, now and on every change, and what its background is, and
   `readevent` reads the answers as `SchemeEvent`s. What dark or light means to
@@ -301,8 +309,8 @@ their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
 `TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
 mouse and bracketed paste, the measuring (`awidth`, `astrip`, `afit`, `apad`,
 `amid`, `awrap`), `markdown_rows`, the key vocabulary, and what reads it from a
-terminal: the events, `readevent`, `scheme_reports`, `enter_terminal` and
-`leave_terminal`. A host that has a
+terminal: the events, `readevent`, `scheme_reports`, `enter_terminal`,
+`leave_terminal`, `InputReader` and `arm!`. A host that has a
 `KeyEvent` of its own imports what it wants by name instead of `using`.
 
 Public and not exported is the rest of the API, which is either a name a host

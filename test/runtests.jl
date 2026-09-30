@@ -1096,6 +1096,56 @@ end
     @test endswith(s, mouse_reporting(true))          # put back, thrown or not
 end
 
+@testset "the reader reads one event when it is armed, and none between" begin
+    p = Pipe()
+    Base.link_pipe!(p; reader_supports_async = true, writer_supports_async = true)
+    events = Channel{Any}(8)
+    r = InputReader(p.out, events)
+    # Not armed, it reads nothing: what arrives now is for whoever reads next,
+    # which is what lets `suspend` hand the terminal to a child.
+    write(p.in, "x")
+    @test read(p.out, UInt8) == UInt8('x')
+    @test !isready(events)
+    # Armed, one event, and then parked again.
+    write(p.in, "\e[Zq")
+    arm!(r)
+    @test take!(events) == KeyEvent(K_STAB)
+    sleep(0.05)
+    @test !isready(events)
+    arm!(r)
+    @test take!(events) == KeyEvent(Int('q'))
+    # The channel is the host's, and its own wakes go on it beside the keys.
+    put!(events, :wake)
+    @test take!(events) === :wake
+    # A read of the host's own for one event, undecoded.
+    write(p.in, "\e[A")
+    arm!(r, io -> readavailable(io))
+    @test take!(events) == Vector{UInt8}("\e[A")
+    # The terminal gone is an event, not a loop left waiting for ever.
+    close(p.in)
+    arm!(r)
+    ev = take!(events)
+    @test ev isa EndEvent && ev.why isa EOFError
+    wait(r.task)
+    @test istaskdone(r.task) && !isready(events)
+
+    # Let go while parked: it ends, and says nothing more.
+    q = Pipe()
+    Base.link_pipe!(q; reader_supports_async = true, writer_supports_async = true)
+    s = InputReader(q.out, events)
+    close(s)
+    wait(s.task)
+    close(q.in)
+    @test istaskdone(s.task) && !isready(events)
+    # And from a held terminal, which is where its input is.
+    t = enter_terminal(IOBuffer("j"), IOBuffer())
+    u = InputReader(t, events)
+    arm!(u)
+    @test take!(events) == KeyEvent(Int('j'))
+    arm!(u)
+    @test take!(events) isa EndEvent                  # an IOBuffer ends too
+end
+
 @testset "the editor a widget hands the buffer to" begin
     # `⌥e` hands the buffer over and takes back whatever comes out. Nothing
     # here depends on an editor being installed: `define_editor` is the hook
