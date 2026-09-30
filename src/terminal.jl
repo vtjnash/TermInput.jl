@@ -23,6 +23,11 @@ back what is on now.
 
 `displaysize(t)` and `write(t, x)` are the output's, `readevent(t)` and
 `input_waiting(t)` the input's.
+
+`HeldTerminal(in, out)` is one nothing has been done to: every mode off, so
+`leave_terminal` and `suspend` on it write only the cursor. For a host that
+wants somewhere to write before it has entered, or after it has left - and a
+test that wants the sequences in an `IOBuffer` without entering at all.
 """
 mutable struct HeldTerminal
     in::IO
@@ -33,6 +38,7 @@ mutable struct HeldTerminal
     mouse::Bool
     paste::Bool
 end
+HeldTerminal(in::IO, out::IO) = HeldTerminal(in, out, nothing, false, false, false, false)
 
 """
     enter_terminal(in = stdin, out = stdout; altscreen = false, title = false,

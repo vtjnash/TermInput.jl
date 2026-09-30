@@ -51,10 +51,11 @@ returned instead, and what is undone and redone is what was done - see
 [`suspend(f, t::HeldTerminal)`](@ref suspend). This form is for a host that set
 the terminal up itself.
 
-`term` is a `REPL.Terminals.TTYTerminal`, or `nothing` where there is no
-terminal to hand over - a test, or a program whose output is a pipe. Everything
-else still happens, which is what makes the escape sequences assertable without
-a tty.
+`term` is a `REPL.Terminals.TTYTerminal`, whose output the sequences are
+written to, or `nothing` where there is no terminal to hand over - a test, or a
+program whose output is a pipe - and they go to `stdout`. Everything else
+still happens, which is what makes the escape sequences assertable without a
+tty.
 
 **Only safe to call from wherever input is read.** A reader task blocked in
 `read(stdin)` will race the child for every keystroke the user types into it,
@@ -63,17 +64,16 @@ that it must be parked between events rather than sitting in `read`, and that
 this runs while it is parked.
 """
 function suspend(f, term; mouse::Bool = false, paste::Bool = false)
-    mouse && print(mouse_reporting(false))
-    paste && print(bracketed_paste(false))
+    out = term === nothing ? stdout : term.out_stream
+    write(out, string(mouse ? mouse_reporting(false) : "", paste ? bracketed_paste(false) : ""))
     term === nothing || REPL.Terminals.raw!(term, false)
-    print("\e[?25h\e[?1049l")
+    write(out, "\e[?25h\e[?1049l")
     try
         f()
     finally
-        print("\e[?1049h\e[?25l")
+        write(out, "\e[?1049h\e[?25l")
         term === nothing || REPL.Terminals.raw!(term, true)
-        mouse && print(mouse_reporting(true))
-        paste && print(bracketed_paste(true))
+        write(out, string(mouse ? mouse_reporting(true) : "", paste ? bracketed_paste(true) : ""))
     end
 end
 

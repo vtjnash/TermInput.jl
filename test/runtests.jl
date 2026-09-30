@@ -1069,6 +1069,12 @@ end
     close(gone)
     @test leave_terminal(t) === nothing
 
+    # One nothing was done to has nothing to undo but the cursor.
+    t = HeldTerminal(IOBuffer(), out)
+    @test !t.altscreen && !t.mouse && !t.paste && t.tty === nothing
+    leave_terminal(t)
+    @test String(take!(out)) == "\e[?25h"
+
     # The size and the writes are the output's, the events the input's.
     t = enter_terminal(IOBuffer("\e[Zq"), out)
     @test displaysize(t) == displaysize(out)
