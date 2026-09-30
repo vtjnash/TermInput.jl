@@ -12,7 +12,7 @@ using Test
 using TermInput
 import TermInput: render, handle!, text, chunks, drawcursor, drawfield, displaycolumn
 # The public names that are not exported, as a host would import them.
-import TermInput: ESCAPE, settext!, curline, move!, newline!, insertblock!, paste!,
+import TermInput: settext!, curline, move!, newline!, insertblock!, paste!,
     backspace!, deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
     kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
@@ -26,26 +26,13 @@ import StyledStrings: Face, SimpleColor
 ansi(r::AbstractString) = sprint(print, r; context = :color => true)
 screen(rows::AbstractVector) = join(ansi.(rows), "\n")
 const REV = Face(inverse = true)
+# What a string of escapes says on the screen, as against how it looks; and the
+# columns it takes there.
+const SGR_OSC = r"\e\[[0-9;:]*[A-Za-z]|\e\][^\e]*\e[\\]"
+unescaped(s::AbstractString) = replace(String(s), SGR_OSC => "")
+cols(s::AbstractString) = textwidth(unescaped(s))
 
 @testset "TermInput" begin
-
-@testset "display width of text with escapes in it" begin
-    @test awidth("plain") == 5
-    @test awidth("\e[32mgreen\e[0m") == 5
-    @test awidth("\e]8;;http://x\e\\link\e]8;;\e\\") == 4
-    @test astrip("\e[32mgreen\e[0m") == "green"
-    @test apad("ab", 5) == "ab   " && awidth(apad("ab", 5)) == 5
-    @test awidth(apad("\e[32mab\e[0m", 5)) == 5
-    # Truncation keeps the escapes it passed and closes the style at the cut -
-    # but only where there was a style to close. Plain text cut short comes
-    # back plain, so a program that emits no escapes goes on emitting none.
-    @test awidth(afit("abcdefgh", 4)) == 4
-    @test afit("abcdefgh", 4) == "abc…"
-    @test endswith(afit("\e[32mabcdefgh", 4), "…\e[0m")
-    @test afit("abc", 10) == "abc"
-    @test afit("abc", 0) == ""
-    @test awidth(afit("\e[32mabcdefgh\e[0m", 4)) == 4
-end
 
 @testset "a name too long for its column is told apart at the end" begin
     # Names in a fixed column agree at the front and differ at the end far more
@@ -55,93 +42,21 @@ end
     # tells you nothing.
     a = "users/someone/tsa-tryheld-state"
     b = "users/someone/tsa-tryheld-other"
-    @test afit(a, 26) == afit(b, 26)              # what eliding at the tail does
-    @test amid(a, 26) != amid(b, 26)              # and what this does instead
-    @test awidth(amid(a, 26)) == 26
-    @test endswith(amid(a, 26), "state") && startswith(amid(a, 26), "users/")
-
+    @test rowfit(a, 26) == rowfit(b, 26)          # what eliding at the tail does
+    @test rowmid(a, 26) != rowmid(b, 26)          # and what this does instead
+    @test rowwidth(rowmid(a, 26)) == 26
+    @test endswith(String(rowmid(a, 26)), "state") && startswith(String(rowmid(a, 26)), "users/")
     # Short enough is left exactly as it was.
-    @test amid("patch-11", 26) == "patch-11"
-    @test amid("", 26) == ""
-    @test amid("anything", 0) == ""
+    @test rowmid("patch-11", 26) == "patch-11" && rowmid("", 26) == ""
+    @test rowmid("anything", 0) == ""
     # Never wider than asked, at any width worth drawing. Below three columns
     # there is no room for a head, a mark and a tail, and the arithmetic that
     # spends `w - 1` on each end would come back one column too wide.
     for w in 1:40, s in (a, b, "x", "abcdefgh")
-        @test awidth(amid(s, w)) <= w
+        @test rowwidth(rowmid(s, w)) <= w
     end
     # A wide character is not split down the middle to make the count come out.
-    @test awidth(amid("日本語のブランチ名前です", 11)) <= 11
-end
-
-@testset "wrapping keeps the style across the break" begin
-    ok(s, w) = all(awidth(l) <= w for l in awrap(s, w))
-    # Nothing is lost or gained: a break only ends a line, it never edits.
-    same(s, w) = astrip(join(awrap(s, w), "")) == astrip(s)
-
-    @test awrap("guard the remaining raw stderr writes that gate cleanup", 40) ==
-          ["guard the remaining raw stderr writes ", "that gate cleanup"]
-    # A word is carried to the next line whole, rather than cut at the margin.
-    @test !any(occursin("deliver_resu", l) && !occursin("deliver_result", l)
-               for l in awrap("guard cleanup in deliver_result and connect_to_peer", 40))
-
-    # A colour opened before a break is replayed after it, or it would stop
-    # there - and the escapes travel with the word they style, so a word carried
-    # down takes its colour with it and is not styled twice.
-    st = awrap("\e[31mred words here\e[0m and \e[32mgreen ones\e[0m too", 14)
-    @test all(awidth(l) <= 14 for l in st)
-    @test count(l -> occursin("\e[32m", l), st) == 1
-    @test startswith(st[2], "\e[31m")          # the colour resumes on line two
-    # ...and ends where line one does, so padding the row paints nothing: a
-    # background open at a break is closed at the break, on every row it spans.
-    bg = awrap("aa \e[41mbbb ccc\e[49m dd", 6)
-    @test bg == ["aa ", "\e[41mbbb \e[0m", "\e[41mccc\e[49m dd"]
-    @test endswith(apad(bg[2], 8), "\e[0m    ")
-    @test awrap("\e[41m" * "x"^10, 4) == ["\e[41mxxxx\e[0m", "\e[41mxxxx\e[0m", "\e[41mxx"]
-    for (s, w) in (("\e[32mgreen words that go on and on and on\e[0m", 12),
-                   ("plain \e[1mbold\e[0m and \e[31mred\e[0m again", 10))
-        @test ok(s, w) && same(s, w)
-    end
-
-    # A run wider than the pane has nowhere to break - a url, a stack frame, a
-    # type signature - so it is split rather than allowed to overflow, and the
-    # pieces fill the width rather than coming out ragged.
-    long = awrap("a " * "x"^45, 20)
-    @test length(long) > 1 && ok("a " * "x"^45, 20)
-    @test length([l for l in long if awidth(l) == 20]) >= 2
-
-    for w in (12, 20, 40, 79)
-        for t in ("short", "", "     ", "a b c d e f g h i j k l m n o p q r s t",
-                  "https://github.com/JuliaLang/julia/pull/62841#issuecomment-372112478 see",
-                  "Tuple{Type{S{N, Tup}}, Vararg{Any}} and some prose after it",
-                  "word " * "y"^100 * " tail")
-            @test ok(t, w)
-            @test same(t, w)
-        end
-    end
-
-    # A hyperlink open at a break is closed on that row and reopened on the
-    # next, or the terminal runs it on across whatever is drawn beside the
-    # line - it knows nothing of panes. Each row carries a whole link.
-    on, off = "\e]8;;https://x.example/a/b\e\\", "\e]8;;\e\\"
-    lk = awrap(string("see ", on, "\e[4mthe linked words here\e[24m", off, " after"), 12)
-    @test all(awidth(l) <= 12 for l in lk) && length(lk) >= 3
-    @test count(l -> count(on, l) == count(off, l), lk) == length(lk)
-    @test count(l -> occursin(on, l), lk) >= 2       # reopened on the next row
-    @test astrip(join(lk, "")) == "see the linked words here after"
-    # A link split mid-run - a bare url wider than the pane - the same.
-    u = awrap(string(on, "https://x.example/", "p"^40, off), 16)
-    @test all(count(on, l) == count(off, l) for l in u) && length(u) > 1
-    # And one closed before the break is not reopened after it.
-    cl = awrap(string(on, "ab", off, " then more words to wrap"), 10)
-    @test count(l -> occursin(on, l), cl) == 1
-    # A cut is a break with nothing after it: the link is closed at it.
-    cut = afit(string("see ", on, "the linked words", off, " after"), 12)
-    @test awidth(cut) <= 12 && count(on, cut) == count(off, cut) == 1
-    @test count(off, afit(string(on, "ab", off, " and the rest of it"), 10)) == 1  # not twice
-
-    # Degenerate widths do not loop or throw.
-    @test awrap("anything", 1) == ["anything"]
+    @test rowwidth(rowmid("日本語のブランチ名前です", 11)) <= 11
 end
 
 @testset "a row of faces is measured, cut and wrapped by its text" begin
@@ -173,13 +88,9 @@ end
     @test String(rowhead(r, 4)) == "ab" && String(rowhead(r, 5)) == String(rowcat("ab", v))
     @test String(rowtail(r, 4)) == "cd" && String(rowfit(r, 4)) == "ab…"
     @test rowwidth(rowpad(r, 4)) <= 4 && rowwidth(rowpad(r, 9)) == 9
-    # Eliding in the middle, as `amid` does.
-    a = "users/someone/tsa-tryheld-state"
-    @test String(rowmid(a, 26)) == amid(a, 26) && rowwidth(rowmid(a, 26)) == 26
-    for w in 1:12
-        @test rowwidth(rowmid(a, w)) <= w
-    end
-    @test rowwidth(rowmid("日本語のブランチ名前です", 11)) <= 11
+    # Eliding in the middle keeps the faces of what it keeps.
+    @test ansi(rowmid(faced("users/someone/tsa-tryheld-state", b), 26)) ==
+          ansi(faced(rowmid("users/someone/tsa-tryheld-state", 26), b))
     # Wrapping breaks at the last space that fits and drops it; a run wider
     # than the row is split, graphemes whole.
     @test String.(rowwrap("guard the remaining raw stderr writes that gate cleanup", 40)) ==
@@ -307,7 +218,7 @@ end
     @test collect(codeunits(text(b))) ==
           vcat(collect(codeunits("ab")), UInt8[0xF4,0x90,0x80,0x80], collect(codeunits("cd")))
     @test length(collect(text(b))) == 5       # one character, not four
-    @test awidth(text(b)) == 5                # and the layout survives it
+    @test cols(text(b)) == 5                # and the layout survives it
 end
 
 @testset "a terminal's bytes, read as events" begin
@@ -782,18 +693,18 @@ end
     for (w, h) in ((80, 24), (120, 40), (60, 12), (40, 9), (200, 60))
         ls = split(screen(render(v, w, h)), "\n")
         @test length(ls) == h
-        @test all(awidth(l) == w for l in ls)
+        @test all(cols(l) == w for l in ls)
     end
     # The box stops widening long before the screen does, because a line of
     # prose 200 columns wide is not one anybody can read.
     wide = split(screen(render(v, 200, 24)), "\n")
-    @test maximum(awidth(astrip(strip(l))) for l in wide) <= v.maxwidth
+    @test maximum(cols(unescaped(strip(l))) for l in wide) <= v.maxwidth
 
     # A buffer taller than the box scrolls to keep the cursor on screen, and
     # the frame stays exactly as tall.
     tall = TextArea("t"; initial = join(string.("line ", 1:200), "\n"))
     ls = split(screen(render(tall, 80, 24)), "\n")
-    @test length(ls) == 24 && all(awidth(l) == 80 for l in ls)
+    @test length(ls) == 24 && all(cols(l) == 80 for l in ls)
     @test any(l -> occursin("line 200", l), ls)      # the cursor's line is shown
     @test !any(l -> occursin("line 1 ", l), ls)
     tall.buf.row = 1
@@ -804,7 +715,7 @@ end
     # buffer is one column rather than a jump or a command.
     for v in (TextArea("T", "line1\nline2"), TextArea("T"; initial = "a\tb\e[31mc\r\td"))
         ls = split(screen(render(v, 40, 20)), "\n")
-        @test length(ls) == 20 && all(awidth(l) == 40 for l in ls)
+        @test length(ls) == 20 && all(cols(l) == 40 for l in ls)
     end
 
     # Whatever is in the buffer, including what a terminal sent and no
@@ -813,7 +724,7 @@ end
     for c in "日本語 é "; handle!(odd, keycode(c)); end
     insert!(odd.buf, keychar(Int(0xF4908080)))
     ls = split(screen(render(odd, 80, 24)), "\n")
-    @test all(awidth(l) == 80 for l in ls)
+    @test all(cols(l) == 80 for l in ls)
 end
 
 @testset "the line input" begin
@@ -861,20 +772,20 @@ end
 
     for (w, h) in ((90, 24), (80, 10), (40, 8), (160, 50))
         ls = split(screen(render(p, w, h)), "\n")
-        @test length(ls) == h && all(awidth(l) == w for l in ls)
+        @test length(ls) == h && all(cols(l) == w for l in ls)
     end
 
     # A line longer than the box scrolls sideways to keep the cursor on it, and
     # a `…` says what went off the front.
     long = LineInput("t"; initial = join('a':'z') * join('0':'9') * join('A':'J'))
     cursorline(v, w) = only(filter(l -> occursin("\e[7m", l), split(screen(render(v, w, 10)), "\n")))
-    l = astrip(cursorline(long, 30))
-    @test awidth(cursorline(long, 30)) == 30 && occursin("> …", l) && occursin("J  ", l)
+    l = unescaped(cursorline(long, 30))
+    @test cols(cursorline(long, 30)) == 30 && occursin("> …", l) && occursin("J  ", l)
     long.buf.col = 1
-    @test occursin("> abc", astrip(cursorline(long, 30)))
+    @test occursin("> abc", unescaped(cursorline(long, 30)))
     long.buf.col = 30
     l = cursorline(long, 30)
-    @test occursin(string(ansi(faced("3", REV)), "…"), l) && occursin("> …", astrip(l))
+    @test occursin(string(ansi(faced("3", REV)), "…"), l) && occursin("> …", unescaped(l))
     @test drawfield("abc", 4, 10) == drawcursor("abc", 4)
     @test String(drawfield("abcdefghij", 11, 10)) == "…defghij "
 end
@@ -922,7 +833,7 @@ end
 
     # The query scrolls sideways, as a line input does.
     query!(c, "x"^100)
-    @test occursin("/ …xxx", astrip(screen(render(c, 60, 20))))
+    @test occursin("/ …xxx", unescaped(screen(render(c, 60, 20))))
     query!(c, "")
 
     # The frame, and where it put the rows, for the mouse.
@@ -930,9 +841,9 @@ end
     m = Choice("t", "", many; numbered = true)
     for (w, h) in ((90, 24), (80, 12), (160, 50))
         ls = split(screen(render(m, w, h)), "\n")
-        @test length(ls) == h && all(awidth(l) == w for l in ls)
+        @test length(ls) == h && all(cols(l) == w for l in ls)
     end
-    ls = split(astrip(screen(render(m, 80, 50))), "\n")
+    ls = split(unescaped(screen(render(m, 80, 50))), "\n")
     @test m.omap[1:4] == [1, 2, 2, 3]
     r3 = findfirst(l -> occursin("3  opt 3", l), ls)
     @test r3 == first(m.orows) + 3
@@ -947,8 +858,8 @@ end
     # A note of two lines is two rows, and the options - and the mouse - move
     # down one for it.
     t = Choice("t", "line one\nline two", ["a", "b"])
-    ls = split(astrip(screen(render(t, 40, 12))), "\n")
-    @test length(ls) == 12 && all(awidth(l) == 40 for l in ls)
+    ls = split(unescaped(screen(render(t, 40, 12))), "\n")
+    @test length(ls) == 12 && all(cols(l) == 40 for l in ls)
     @test ls[first(t.orows) + 1] |> l -> occursin(" b ", l)
     @test click!(t, :press, 10, first(t.orows) + 1, 1.0) === :ok && selected(t) == 2
 
@@ -986,10 +897,10 @@ end
     q2 = Confirm("Quit", "a draft", ["yY", "\e"]; hint = "y quits · esc goes back")
     @test answer(q2, 27) == 2 && answer(q2, K_UP) == 0
     ls = split(screen(render(q2, 60, 10)), "\n")
-    @test length(ls) == 10 && all(awidth(l) == 60 for l in ls)
+    @test length(ls) == 10 && all(cols(l) == 60 for l in ls)
     @test any(l -> occursin("esc goes back", l), ls)
     q3 = Confirm("Quit", "a draft\nand a stash")
-    ls = split(astrip(screen(render(q3, 60, 10))), "\n")
+    ls = split(unescaped(screen(render(q3, 60, 10))), "\n")
     @test length(ls) == 10 && count(l -> occursin("a draft", l) || occursin("and a stash", l), ls) == 2
 end
 
@@ -1267,7 +1178,7 @@ end
 end
 
 @testset "a frame is one write, cursor hidden first and shown last" begin
-    b = String(frame_bytes("ab\ncd", "", (2, 1)))
+    b = String(frame_bytes(["ab", "cd"], "", (2, 1)))
     # Held by the terminal until the closing sequence, drawn with the cursor
     # hidden, and the cursor put where the host said and shown only then.
     @test startswith(b, "\e[?2026h\e[?25l\e[?7l\e[1;1r")
@@ -1278,18 +1189,18 @@ end
     @test occursin("\e[1;1r\e[1H\e[Mab\e[2;2r\e[2H\e[Mcd\e[r\e[?7h", b)
     @test !occursin("\e[K", b) && !occursin("\e[J", b) && !occursin('\n', b)
     # No cursor to show: it stays hidden, and nothing moves it.
-    n = String(frame_bytes("ab"))
+    n = String(frame_bytes(["ab"]))
     @test endswith(n, "\e[Mab\e[r\e[?7h\e[?2026l") && !occursin("?25h", n)
     # The title goes after the frame and before the caret, inside the hold.
-    t = String(frame_bytes("x", "\e]2;a title\e\\", (1, 1)))
+    t = String(frame_bytes(["x"], "\e]2;a title\e\\", (1, 1)))
     @test occursin("\e[r\e[?7h\e]2;a title\e\\\e[1;1H\e[?25h", t)
     # Rows the frame did not bring, to the screen's height, are deleted too.
-    f = String(frame_bytes("ab", "", nothing; h = 3))
+    f = String(frame_bytes(["ab"], "", nothing; h = 3))
     @test occursin("\e[Mab\e[2;2r\e[2H\e[M\e[3;3r\e[3H\e[M\e[r", f)
     # A row wider than the screen does not wrap onto the next: auto-wrap is
     # off from before the first row to after the last, and on again after,
     # and the next row is put at its own line whatever the cursor did.
-    wide = String(frame_bytes("abcdef\ngh"))
+    wide = String(frame_bytes(["abcdef", "gh"]))
     off, on = findfirst("\e[?7l", wide), findfirst("\e[?7h", wide)
     @test last(off) < first(findfirst("abcdef", wide)) &&
           first(on) > last(findfirst("gh", wide))
@@ -1301,7 +1212,6 @@ end
     fr = String(frame_bytes([bold, TermInput.row("cd"), "\e[1mef"]))
     @test occursin(string("\e[1H\e[M", out(bold), "\e[2;2r"), fr)
     @test occursin("\e[2H\e[Mcd\e[3;3r\e[3H\e[M\e[1mef\e[r", fr)
-    @test frame_bytes(["ab", "cd"], "", (2, 1)) == frame_bytes("ab\ncd", "", (2, 1))
     # A verbatim piece is written as it is and closed, and what follows it is
     # written from the column after its width, however little it drew.
     v = rowcat("│", verbatim("\e[31mab", 5), faced("│", Face(weight = :bold)))
@@ -1417,7 +1327,7 @@ end
     @test !occursin("\e[7m", dark)
     # Only the cursor goes. Everything else is the same frame, at the same size,
     # so a host laying two columns against each other gets no shift out of it.
-    @test astrip(dark) == astrip(lit)
+    @test unescaped(dark) == unescaped(lit)
     @test length(split(dark, "\n")) == length(split(lit, "\n")) == 16
 
     # It is a way of drawing and not a way of behaving: an unfocused widget
@@ -1449,7 +1359,7 @@ end
             @test Base.ispublic(TermInput, n)
         end
         # A name a host is likely to have is not pushed into its namespace.
-        for n in (:transpose!, :move!, :kill!, :yank!, :ESCAPE, :render)
+        for n in (:transpose!, :move!, :kill!, :yank!, :render)
             @test !Base.isexported(TermInput, n)
         end
     end
@@ -1463,10 +1373,10 @@ end
     # exactly the width asked for, whatever went into it.
     function drawn(s, w = 40; kw...)
         rs = markdown_rows(md(s), w; kw...)
-        @test all(r -> awidth(ansi(r.text)) == w, rs)
+        @test all(r -> cols(ansi(r.text)) == w, rs)
         rs
     end
-    texts(rs) = [rstrip(astrip(ansi(r.text))) for r in rs]
+    texts(rs) = [rstrip(unescaped(ansi(r.text))) for r in rs]
     B, BG = Face(weight = :bold), Face(background = SimpleColor(:blue))
     I, D, U = Face(slant = :italic), Face(weight = :light), Face(underline = true)
     Y = Face(foreground = SimpleColor(:yellow))
@@ -1552,7 +1462,7 @@ end
         rs = drawn("```\n" * "a "^30 * "\n```", 20)
         @test length(rs) == 4 && rs[1].first && !any(r -> r.first, rs[2:end])
         @test all(r -> r.src == rstrip("a "^30), rs)
-        @test astrip(ansi(rs[1].text)) == "   " * "a a a a a a a a a"[1:17]
+        @test unescaped(ansi(rs[1].text)) == "   " * "a a a a a a a a a"[1:17]
         # With no highlighter for the language, the block is `codeblock` alone.
         @test TermInput.highlight("python", "x = 1") == Tuple{UnitRange{Int},Symbol}[]
     end
@@ -1571,10 +1481,10 @@ end
         # wrapped rather than cut - and then a rule between the body's rows.
         wide = "| k | v |\n|---|---|\n| a | " * "word "^12 * "|\n| b | c |"
         rs = drawn(wide, 30)
-        @test all(r -> awidth(ansi(r.text)) == 30, rs)
+        @test all(r -> cols(ansi(r.text)) == 30, rs)
         @test occursin("word", join(texts(rs)))
         @test count(r -> occursin("word", ansi(r.text)), rs) > 1
-        @test count(r -> startswith(astrip(ansi(r.text)), "├"), rs) == 2
+        @test count(r -> startswith(unescaped(ansi(r.text)), "├"), rs) == 2
         # A column with no room is narrowed only so far.
         @test TermInput.fitcolumns([50, 50], 10) == [TermInput.TABLE_FLOOR, TermInput.TABLE_FLOOR]
         @test TermInput.fitcolumns([3, 30], 30) == [3, 20]
@@ -1626,7 +1536,7 @@ end
         # space. The stdlib keeps the newline from 1.14 only.
         if VERSION >= v"1.14.0-DEV"
             rs = drawn("one\ntwo"; breaks = true)
-            @test [(astrip(ansi(r.text)) |> rstrip, r.src, r.first) for r in rs] ==
+            @test [(unescaped(ansi(r.text)) |> rstrip, r.src, r.first) for r in rs] ==
                   [("one", "one", true), ("two", "two", true)]
             @test texts(drawn("one\ntwo")) == ["one two"]
             # Two spaces at a line's end break it either way, as CommonMark says.
@@ -1641,7 +1551,7 @@ end
         @test texts(rs) == ["中文", "中文", "中文"]
         rs = drawn("éééé", 2)
         @test texts(rs) == ["éé", "éé"]
-        @test all(r -> awidth(ansi(r.text)) == 2, rs)
+        @test all(r -> cols(ansi(r.text)) == 2, rs)
         # A word wider than the row is split by columns.
         @test texts(drawn("x" ^ 25, 10)) == ["x"^10, "x"^10, "x"^5]
         # Too narrow for a marker or a box is cut to the width, never wider.
@@ -1698,7 +1608,7 @@ end
         rs = markdown_rows(Markdown.parse("```julia\nfunction f() end\n```"), 30;
                            style = MarkdownStyle(faces = Dict(:keyword => Y)))
         @test occursin("\e[33mfunction\e[39m", ansi(rs[1].text))
-        @test astrip(ansi(rs[1].text)) == rpad("   function f() end", 30)
+        @test unescaped(ansi(rs[1].text)) == rpad("   function f() end", 30)
         @test rs[1].src == "function f() end"
         # The colours alone, for a host drawing code its own way: a line each,
         # tabs as written, each line closed.

@@ -40,10 +40,8 @@ embeds one.
 
 ## The pieces
 
-  * `ansi.jl`      display widths, fitting and wrapping for text with escape
-                   sequences in it
-  * `rows.jl`      the same for a row of faces - an annotated string - with
-                   pieces of it drawn verbatim
+  * `rows.jl`      a row of faces - an annotated string - measured, cut and
+                   wrapped by its text, with pieces of it drawn verbatim
   * `keys.jl`      the key vocabulary: one code per key, as a submodule
   * `events.jl`    `readevent`: a terminal's bytes as keys, pastes, mouse
                    reports and colour-scheme reports
@@ -64,11 +62,13 @@ embeds one.
   * `markdown.jl`  `markdown_rows`: a parsed `Markdown.MD` as rows of exactly
                    `w` columns, each knowing the line it came from
 
-## What it measures with
+## What it draws with
 
-Its own. `awidth`, `afit`, `apad` and `awrap` count display columns in text
-that already has escapes in it, which is what a host hands over: a title it
-styled, a note, a buffer somebody typed braces into.
+Rows of faces: an annotated string, StyledStrings faces over ranges of its
+text, measured by the text - `rowwidth`, `rowfit`, `rowpad`, `rowwrap` - and
+written by StyledStrings at the frame. A title a host styled, a note, a
+buffer somebody typed braces into are all measured the same way, and no
+escape is written until the frame is.
 """
 module TermInput
 
@@ -78,7 +78,6 @@ import Markdown
 
 # Exported: what a host driving a widget writes on every call, with names
 # specific enough that it is unlikely to have them already.
-export awidth, astrip, afit, apad, amid, awrap
 export rowwidth, rowfit, rowpad, rowmid, rowwrap, rowcat, faced
 export TextBuffer
 export suspend, compose_external, mouse_reporting, bracketed_paste
@@ -106,7 +105,7 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
 @static if VERSION >= v"1.11.0-DEV.469"
     eval(Meta.parse("""public render, handle!, text, paste!, click!, column,
         query, query!, selected, matches, doubled, DOUBLECLICK, ACTIONS,
-        ESCAPE, oneline, notetext, drawfield, bufferrows, settext!, curline, move!,
+        oneline, notetext, drawfield, bufferrows, settext!, curline, move!,
         newline!, insertblock!, backspace!, deletechar!, killline!,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
@@ -117,7 +116,6 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         verbatim, wrapspans"""))
 end
 
-include("ansi.jl")
 include("rows.jl")
 include("keys.jl")
 using .Keys

@@ -337,31 +337,29 @@ as a `Row` to each line, for a host that draws a block of code its own way.
 
 The border is drawn from `BOXES`, this package's own table of box characters -
 `ROUNDED`, `SQUARE`, `HEAVY`, `DOUBLE` and `MINIMAL_HEAVY_HEAD`, by the names
-Term gives them - and which one is `CHROME[].box`, set beside the weights it is
+Term gives them - and which one is `CHROME[].box`, set beside the faces it is
 painted in. Nothing here depends on Term.
 
 The measuring is this package's own, and deliberately so. Term's `Panel`
 measures *markup*, which is wrong here in both directions at once. A title or a
-note a host has already styled with raw SGR is counted as characters, so a line
-that fits is wrapped and the panel elides its own tail. And a buffer full of
-prose is not markup at all, so a `{` somebody typed is read as a tag and
-silently deleted - which is the more damaging half, because what is lost is
-what was written. So `awidth`, `afit`, `apad` and `awrap` work against real
-display widths. They are exported, since a host laying a widget out beside
-something else has the same problem one step out.
+note a host has already styled is counted as characters, so a line that fits
+is wrapped and the panel elides its own tail. And a buffer full of prose is not
+markup at all, so a `{` somebody typed is read as a tag and silently deleted -
+which is the more damaging half, because what is lost is what was written.
 
-A row can also be faces rather than escapes: a `Row`, which is an
+So a row is faces rather than escapes: a `Row`, which is an
 `AnnotatedString{String}` with StyledStrings `Face`s over ranges of it, and
 which StyledStrings writes. `rowwidth`, `rowfit`, `rowpad`, `rowmid`,
-`rowhead`, `rowtail`, `rowwrap` and `rowwraplines` are the same measures for
-one, and keep the faces over whatever they keep: a cut through a bold title
-ends in a bold `…`, and a face across a wrap is on both rows, each closing it.
-`faced(s, face)` draws `s` in a face, under the faces it has, `overlaid` lays
-one over a range, `linked` makes it a hyperlink, and `rowcat` is `*` for rows,
-which on 1.10 drops the faces. And `verbatim(text, w)` is a piece of a row
-that is somebody else's escapes, drawn as it is and `w` wide - a program's
-screen as a multiplexer gave it: its width is never measured and nothing cuts
-or wraps inside it.
+`rowhead`, `rowtail`, `rowwrap` and `rowwraplines` measure one by its text and
+keep the faces over whatever they keep: a cut through a bold title ends in a
+bold `…`, and a face across a wrap is on both rows, each closing it. `faced(s,
+face)` draws `s` in a face, under the faces it has, `overlaid` lays one over a
+range, `linked` makes it a hyperlink, and `rowcat` is `*` for rows, which on
+1.10 drops the faces. And `verbatim(text, w)` is a piece of a row that is
+somebody else's escapes, drawn as it is and `w` wide - a program's screen as a
+multiplexer gave it: its width is never measured and nothing cuts or wraps
+inside it. They are exported, since a host laying a widget out beside
+something else has the same problem one step out.
 
 ## How this differs from `Term.Live`'s `InputBox`
 
@@ -376,7 +374,7 @@ same widget. `InputBox` collects keystrokes; this edits text.
 | delete | the last character only | before the cursor, under it, by word, by line |
 | multi-line | `↵` appends a newline; no wrapping, no row mapping | soft wrap, and the cursor mapped onto the wrapped row |
 | finishing | `esc` quits the app; the text is read off the field | the host's - the key comes back and the host says what it meant |
-| measuring | `Panel`, so markup | display width |
+| measuring | `Panel`, so markup | display width, of text under faces |
 | input | `readkey` under `bytesavailable`, polled | one key code, from whatever loop the host has - `readevent`'s, or its own |
 
 The last row is the one that decides the others: a widget cannot have a cursor
@@ -389,9 +387,8 @@ Exported is what a host driving a widget writes on every call, under names
 specific enough that it is unlikely to have them already: the four widgets and
 their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
 `TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
-mouse and bracketed paste, the measuring (`awidth`, `astrip`, `afit`, `apad`,
-`amid`, `awrap`, and `rowwidth`, `rowfit`, `rowpad`, `rowmid`, `rowwrap`,
-`rowcat` and `faced` for rows of faces), `markdown_rows`, the key vocabulary, and what reads it from a
+mouse and bracketed paste, rows of faces and their measuring (`rowwidth`,
+`rowfit`, `rowpad`, `rowmid`, `rowwrap`, `rowcat`, `faced`), `markdown_rows`, the key vocabulary, and what reads it from a
 terminal: the events, `readevent`, `scheme_reports`, `enter_terminal`,
 `leave_terminal`, `InputReader`, `arm!`, `frame_bytes` and `input_waiting`. A host that has a
 `KeyEvent` of its own imports what it wants by name instead of `using`.
@@ -409,7 +406,7 @@ is likely to have already or one it uses once, where it sets a widget up:
   `CHROME`, `DIALOG_WIDTH` - and
   what a host drawing a field or a list of its own shares with the widgets:
   `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
-  `ESCAPE`, and for rows of faces `Row`, `row`, `rowhead`, `rowtail`,
+  and for rows of faces `Row`, `row`, `rowhead`, `rowtail`,
   `rowlines`, `rowwraplines`, `overlaid`, `linked`, `verbatim` and the break
   they wrap at, `wrapspans`
 * `MarkdownStyle`, `MDRow`, `highlight`, `codemime` and `highlighted_lines`,

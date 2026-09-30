@@ -269,7 +269,7 @@ end
     rowmid(s, w) -> Row
 
 `s` fitted to `w` columns by eliding in the *middle*, two thirds of the room
-to the head and one third to the tail.
+to the head and one third to the tail, the `…` in the faces it cut through.
 
 Names in a fixed column agree at the front and differ at the end far more often
 than the other way round: branches under one owner prefix, worktrees of one
@@ -287,11 +287,11 @@ function rowmid(s::AbstractString, w::Int)
     # Below three columns there is no room for a head, a mark and a tail, and
     # the arithmetic below would spend `w - 1` on each end and come back one
     # column too wide. Nothing useful can be said in two columns anyway.
-    w == 1 && return Row("…", Annot[])
-    w == 2 && return rowcat(rowhead(x, 1), "…")
+    w == 1 && return ellipsis(x, 1)
+    w == 2 && (h = rowhead(x, 1); return rowcat(h, ellipsis(x, ncodeunits(h.string) + 1)))
     keep = w - 1                       # what is left once the mark is paid for
-    head = max(1, (2 * keep) ÷ 3)
-    rowcat(rowhead(x, head), "…", rowtail(x, keep - head))
+    h = rowhead(x, max(1, (2 * keep) ÷ 3))
+    rowcat(h, ellipsis(x, ncodeunits(h.string) + 1), rowtail(x, keep - rowwidth(h)))
 end
 
 # --- wrapping ---------------------------------------------------------------

@@ -5,7 +5,6 @@
 
 """
     frame_bytes(rows, title = "", cursor = nothing; h = 0) -> Vector{UInt8}
-    frame_bytes(frame::AbstractString, title = "", cursor = nothing; h = 0)
 
 One full-screen frame - `render`'s rows, top to bottom - as the bytes the
 terminal is sent, in one write. `title` goes after the rows as it is (an
@@ -16,8 +15,7 @@ did not bring, up to it, are cleared too; `0` is the frame's own.
 
 A row is a [`Row`](@ref), written by StyledStrings in its faces - whatever the
 stream, since what turns colour on is the faces a host put there, and a row
-with none writes no escape at all - or a `String`, written as it is. A frame as
-one string is its rows joined by newlines.
+with none writes no escape at all - or a `String`, written as it is.
 
 A `:verbatim` piece of a row ([`verbatim`](@ref)) is written as it is, with a
 reset after it, since what it opened is its own and the row goes on; then the
@@ -87,9 +85,6 @@ function frame_bytes(rows::AbstractVector{<:AbstractString}, title::AbstractStri
     print(io, "\e[?2026l")
     take!(io)
 end
-frame_bytes(frame::AbstractString, title::AbstractString = "",
-            cur::Union{Nothing,Tuple{Int,Int}} = nothing; h::Int = 0) =
-    frame_bytes(split(frame, '\n'), title, cur; h)
 
 """One row onto a frame: its faces by StyledStrings, and each verbatim piece
 as it is, closed, with the cursor moved past its width."""

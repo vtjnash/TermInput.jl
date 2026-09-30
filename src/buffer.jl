@@ -508,8 +508,8 @@ shown(s::AbstractString) = map(shown, s)
 
 """Split a line into fixed-width pieces, exactly as a text area draws it.
 
-Not [`awrap`](@ref): that one carries ANSI state across the break and its wrap
-points are its own business. Here the wrap has to be predictable in the *other*
+Not [`rowwrap`](@ref): that one breaks at spaces and its wrap points are its
+own business. Here the wrap has to be predictable in the *other*
 direction - from a character offset to the row and column it lands on - so the
 rule is the simplest one there is, and the text area owns it.
 """
