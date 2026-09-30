@@ -69,8 +69,7 @@ function InputReader(in::IO, events::Channel)
                 break                       # closed: nobody wants more
             end
             ev = try
-                # Latest, since a host's own read may be newer than this task.
-                Base.invokelatest(readone, r.in)
+                readone(r.in)
             catch e
                 # EOF because the terminal closed, EIO because the pty is gone.
                 # The loop is waiting on its channel and nothing else is
@@ -100,6 +99,11 @@ Let `r` read one event, with `read(in)` - [`readevent`](@ref), or a host's own
 for a stretch of input it wants some other way, undecoded to pass on to a
 program it runs, say. Which one is decided here, by the loop, where it knows
 what is in front of it, and not by the reader, which is parked between events.
+
+`read` is called in the world the reader's task was started in, so it has to
+be a method that existed then: one defined later - a closure evaluated after
+the reader was made, a method added at a REPL - is the host's to reach, with
+`Base.Fix1(invokelatest, f)` if it wants that.
 """
 arm!(r::InputReader, read = readevent) = (put!(r.ready, read); r)
 

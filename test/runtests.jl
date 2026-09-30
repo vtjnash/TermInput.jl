@@ -1119,7 +1119,7 @@ end
     @test take!(events) === :wake
     # A read of the host's own for one event, undecoded.
     write(p.in, "\e[A")
-    arm!(r, io -> readavailable(io))
+    arm!(r, readavailable)
     @test take!(events) == Vector{UInt8}("\e[A")
     # The terminal gone is an event, not a loop left waiting for ever.
     close(p.in)
