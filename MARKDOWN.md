@@ -213,7 +213,7 @@ styling and never text.
        that assigns `CHROME[]` gives all five fields now.
 2. [x] **`src/markdown.jl`**: `markdown_rows`, `MDRow`, `MarkdownStyle`, the
        elements above.
-3. [ ] **Tests, with no tty**: one per element, per nesting (a table in a
+3. [x] **Tests, with no tty**: one per element, per nesting (a table in a
        list, a code span split across a wrap, a list in a quote), the source
        map (a paragraph wrapped over three rows is one `src`, `first` on the
        first), every row exactly `w` columns, and wide characters and

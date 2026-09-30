@@ -984,4 +984,191 @@ end
     end
 end
 
+@testset "markdown, drawn as rows" begin
+    import Markdown
+    import TermInput: MarkdownStyle, MDRow
+    md(s) = Markdown.parse(s)
+    # The rows as they read, and the check every render has to pass: each one
+    # exactly the width asked for, whatever went into it.
+    function drawn(s, w = 40; kw...)
+        rs = markdown_rows(md(s), w; kw...)
+        @test all(r -> awidth(r.text) == w, rs)
+        rs
+    end
+    texts(rs) = [rstrip(astrip(r.text)) for r in rs]
+    B = ("\e[1m", "\e[22m")
+    BG = ("\e[48;5;236m", "\e[49m")
+    I, D, U, Y = ("\e[3m", "\e[23m"), ("\e[2m", "\e[22m"), ("\e[4m", "\e[24m"),
+                 ("\e[33m", "\e[39m")
+
+    @testset "one per element" begin
+        @test texts(drawn("just words")) == ["just words"]
+        @test texts(drawn("# One\n\n###### Six")) == ["One", "", "Six"]
+        # The level is carried by the style and nothing else.
+        rs = drawn("## Two"; style = MarkdownStyle(h2 = B))
+        @test startswith(rs[1].text, "\e[1mTwo\e[22m")
+        rs = drawn("a **b** *c* ~~d~~";
+                   style = MarkdownStyle(bold = B, italic = ("\e[3m", "\e[23m"),
+                                         strike = ("\e[9m", "\e[29m")))
+        @test occursin("\e[1mb\e[22m", rs[1].text)
+        @test occursin("\e[3mc\e[23m", rs[1].text)
+        @test occursin("\e[9md\e[29m", rs[1].text)
+        # Nested as written: the inner style inside the outer.
+        rs = drawn("**a *b* c**"; style = MarkdownStyle(bold = B, italic = I))
+        @test occursin("\e[1m\e[3mb\e[23m\e[22m", rs[1].text)
+        # A code span keeps its backticks, in `code_tick` inside `code`.
+        rs = drawn("x `y` z"; style = MarkdownStyle(code = BG, code_tick = D))
+        @test occursin("\e[48;5;236m\e[2m`\e[22m\e[49m\e[48;5;236my\e[49m", rs[1].text)
+        @test rs[1].src == "x `y` z"
+        # Julia reads a double backtick as maths, so the span is built by hand.
+        rs = markdown_rows(Markdown.MD(Any[Markdown.Paragraph(Any[Markdown.Code("", "a`b")])]), 10)
+        @test texts(rs) == ["``a`b``"]
+        # A link is its label; the url is the host's.
+        rs = drawn("see [the docs](https://example.com) now";
+                   style = MarkdownStyle(link = U))
+        @test rstrip(rs[1].text) == "see \e[4mthe docs\e[24m now"
+        @test texts(drawn("![a cat](cat.png)")) == ["a cat"]
+        # A list: the bullet, or numbers right-aligned to the widest.
+        @test texts(drawn("- a\n- b")) == ["• a", "• b"]
+        @test texts(drawn("9. a\n10. b\n11. c")) == [" 9. a", "10. b", "11. c"]
+        # Loose when an item has more than one block: a blank row between.
+        @test texts(drawn("- a\n\n  more\n- b")) == ["• a", "", "  more", "", "• b"]
+        # ...and tight when all that makes it loose is what follows it.
+        @test texts(drawn("- a\n- b\n\nafter")) == ["• a", "• b", "", "after"]
+        # An empty item still has its bullet.
+        @test texts(drawn("- a\n- \n- c")) == ["• a", "•", "• c"]
+        @test texts(drawn("> said\n>\n> twice")) == ["│ said", "│", "│ twice"]
+        rs = drawn("!!! warning \"Mind\"\n    the gap";
+                   style = MarkdownStyle(warning = Y))
+        @test [rstrip(r.text) for r in rs] == ["\e[33m│ \e[39m\e[33mMind\e[39m", "\e[33m│ \e[39mthe gap"]
+        @test texts(drawn("!!! tip\n    x")) == ["│ Tip", "│ x"]
+        @test [r.text for r in drawn("---"; style = MarkdownStyle(rule = Y))] ==
+              ["\e[33m" * "─"^40 * "\e[39m"]
+        @test texts(drawn("a\\\nb")) == ["a", "b"]           # a LineBreak
+        @test texts(drawn("\$\$x^2\$\$")) == ["\$\$x^2\$\$"]
+        @test texts(drawn("a note[^1]\n\n[^1]: said here")) ==
+              ["a note[^1]", "", "[^1]: said here"]
+        @test texts(drawn("<div>\nhi\n</div>")) == ["<div>", "hi", "</div>"]
+    end
+
+    @testset "code blocks" begin
+        rs = drawn("```\nx = 1\n\ty\n```"; style = MarkdownStyle(codeblock = BG))
+        @test [r.text for r in rs] == ["  \e[48;5;236m x = 1" * " "^32 * "\e[49m",
+                            "  \e[48;5;236m         y" * " "^28 * "\e[49m"]
+        # Padded to the width, background and all, so the block reads as one.
+        @test endswith(rs[1].text, "\e[49m")
+        # The source keeps the tab; the row draws it as its columns.
+        @test rs[2].src == "\ty"
+        # Hard-wrapped, never reflowed: each row a piece of the one line.
+        rs = drawn("```\n" * "a "^30 * "\n```", 20)
+        @test length(rs) == 4 && rs[1].first && !any(r -> r.first, rs[2:end])
+        @test all(r -> r.src == rstrip("a "^30), rs)
+        @test astrip(rs[1].text) == "   " * "a a a a a a a a a"[1:17]
+        # With no highlighter for the language, the block is `codeblock` alone.
+        @test TermInput.highlight("python", "x = 1") == Tuple{UnitRange{Int},Symbol}[]
+    end
+
+    @testset "tables" begin
+        t = "| a | b |\n|:--|--:|\n| one | 2 |\n| three | 45 |"
+        @test texts(drawn(t)) == ["╭───────┬────╮", "│ a     │  b │", "├───────┼────┤",
+                                  "│ one   │  2 │", "│ three │ 45 │", "╰───────┴────╯"]
+        @test texts(drawn(t; style = MarkdownStyle(box = TermInput.BOXES.SQUARE)))[1] ==
+              "┌───────┬────┐"
+        rs = drawn(t; style = MarkdownStyle(table_head = B, table_rule = Y))
+        @test occursin("\e[1ma\e[22m", rs[2].text)
+        @test startswith(rs[1].text, "\e[33m╭")
+        @test rs[4].src == "| one | 2 |"
+        # Fitted to the width: the widest column narrowed first, and its cell
+        # wrapped rather than cut - and then a rule between the body's rows.
+        wide = "| k | v |\n|---|---|\n| a | " * "word "^12 * "|\n| b | c |"
+        rs = drawn(wide, 30)
+        @test all(r -> awidth(r.text) == 30, rs)
+        @test occursin("word", join(texts(rs)))
+        @test count(r -> occursin("word", r.text), rs) > 1
+        @test count(r -> startswith(astrip(r.text), "├"), rs) == 2
+        # A column with no room is narrowed only so far.
+        @test TermInput.fitcolumns([50, 50], 10) == [TermInput.TABLE_FLOOR, TermInput.TABLE_FLOOR]
+        @test TermInput.fitcolumns([3, 30], 30) == [3, 20]
+    end
+
+    @testset "nesting" begin
+        # A table in a list is drawn at its indent, not centred beside it.
+        rs = drawn("- item\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |")
+        @test texts(rs)[3] == "  ╭───┬───╮"
+        @test texts(rs)[4] == "  │ a │ b │"
+        # A list in a quote, and a quote in a list.
+        @test texts(drawn("> - a\n> - b")) == ["│ • a", "│ • b"]
+        @test texts(drawn("- > a")) == ["• │ a"]
+        @test texts(drawn("- a\n  - b\n    - c")) == ["• a", "  • b", "    • c"]
+        # A code span split across a wrap is closed at the end of one row and
+        # opened again on the next, and nothing is left in force at either end.
+        rs = drawn("xxxxxx `aaa bbb ccc` yy", 12; style = MarkdownStyle(code = BG))
+        @test length(rs) == 2
+        for r in rs
+            @test count("\e[48;5;236m", r.text) == count("\e[49m", r.text)
+            @test !endswith(rstrip(r.text), "\e[48;5;236m")
+        end
+        @test occursin("\e[48;5;236m`aaa\e[49m", rs[1].text)
+        @test startswith(rs[2].text, "\e[48;5;236mbbb ccc`\e[49m")
+        # The padding is never painted.
+        @test all(r -> !occursin(r"\e\[48;5;236m\s*$", r.text), rs)
+    end
+
+    @testset "the source map" begin
+        # A paragraph wrapped over three rows is one `src`, `first` on the first.
+        p = "the quick brown fox jumps over the lazy dog and keeps going"
+        rs = drawn(p, 24)
+        @test length(rs) == 3
+        @test all(r -> r.src == p, rs)
+        @test [r.first for r in rs] == [true, false, false]
+        # A line in a list starts behind its marker, and that is in its `src`.
+        rs = drawn("- " * p, 24)
+        @test all(r -> r.src == "• " * p, rs) && rs[1].first && !rs[2].first
+        rs = drawn("> " * p, 24)
+        @test all(r -> r.src == "│ " * p, rs)
+        # Blank rows are lines of their own.
+        rs = drawn("a\n\nb")
+        @test [(r.src, r.first) for r in rs] == [("a", true), ("", true), ("b", true)]
+        # `breaks`: a newline is a line break, each its own line; without it a
+        # space. The stdlib keeps the newline from 1.14 only.
+        if VERSION >= v"1.14.0-DEV"
+            rs = drawn("one\ntwo"; breaks = true)
+            @test [(astrip(r.text) |> rstrip, r.src, r.first) for r in rs] ==
+                  [("one", "one", true), ("two", "two", true)]
+            @test texts(drawn("one\ntwo")) == ["one two"]
+            # Two spaces at a line's end break it either way, as CommonMark says.
+            @test texts(drawn("one  \ntwo")) == ["one", "two"]
+        end
+    end
+
+    @testset "widths are the terminal's" begin
+        # A wide character is two columns and is never split; a combining mark
+        # is none, and stays with the letter it marks.
+        rs = drawn("中文中文中文", 5)
+        @test texts(rs) == ["中文", "中文", "中文"]
+        rs = drawn("éééé", 2)
+        @test texts(rs) == ["éé", "éé"]
+        @test all(r -> awidth(r.text) == 2, rs)
+        # A word wider than the row is split by columns.
+        @test texts(drawn("x" ^ 25, 10)) == ["x"^10, "x"^10, "x"^5]
+        # Too narrow for a marker or a box is cut to the width, never wider.
+        for w in 1:6
+            drawn("- a\n\n> b\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```\ncode\n```", w)
+        end
+    end
+
+    @testset "no style asked for, no escape written" begin
+        doc = "# h\n\n**b** *i* `c` [l](u)\n\n> q\n\n```\nx\n```\n\n| a |\n|---|\n| b |\n\n---"
+        @test !any(r -> occursin('\e', r.text), drawn(doc))
+    end
+
+    @testset "an element it does not know is its text" begin
+        struct Mystery end
+        Markdown.plain(io::IO, ::Mystery) = print(io, "a mystery")
+        Markdown.plaininline(io::IO, ::Mystery) = print(io, "inline mystery")
+        rs = markdown_rows(Markdown.MD(Any[Mystery(), Markdown.Paragraph(Any["x ", Mystery()])]), 30)
+        @test texts(rs) == ["a mystery", "", "x inline mystery"]
+    end
+end
+
 end # testset TermInput

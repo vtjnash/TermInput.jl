@@ -448,7 +448,8 @@ function block!(out::Vector{MDRow}, c::Markdown.Code, w::Int, ctx::Ctx)
     for (line, src) in zip(lines, srcs)
         for (k, row) in enumerate(wraprun(line, inner; hard = true))
             fill = max(0, inner - runwidth(row))
-            text = string("  ", styled(" ", cb), emit(row), styled(" "^fill, cb))
+            base = with(MDStyle[], cb)
+            text = string("  ", emit(vcat(Run(" ", base), row, Run(" "^fill, base))))
             push!(out, MDRow(apad(text, w), rstrip(src), k == 1))
         end
     end
