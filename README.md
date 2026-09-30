@@ -77,7 +77,8 @@ itself and takes none of what follows. A host that has nothing composes these.
   `suspend(f, t)` hands exactly that back to `$EDITOR` and takes it again.
   `displaysize(t)` and `write(t, x)` are its output's, `readevent(t)` its
   input's, and anything that is not a tty - an `IOBuffer`, in a test - is
-  taken as it is.
+  taken as it is. A pair and not a do-block, because the `try` it needs is
+  the one around the host's own loop.
 * **`readevent(io)`** reads one event from a terminal in raw mode: a
   `KeyEvent` whose `code` is what `handle!` takes, a `PasteEvent` whose `text`
   is what `paste!` takes, a `MouseEvent` whose `kind`, `x` and `y` are what
@@ -88,6 +89,9 @@ itself and takes none of what follows. A host that has nothing composes these.
   `REPL.TerminalMenus.readkey` returns Escape and leaves the tail to arrive
   as keys, which is Shift-Tab reading as Escape-then-`Z`. It never decides
   by the clock: a bare Escape is one with nothing already waiting behind it.
+  It reads no kitty keyboard protocol and no mouse encoding but SGR; a host
+  that wants one writes its own reader and keeps everything else, which is
+  why nothing here owns the loop.
 * **`InputReader(t, events)`** is a task that reads one event each time it is
   armed - `arm!(r)`, or `arm!(r, read)` with a read of the host's own - and puts
   it on `events`, a `Channel` the host owns, so that whatever else wakes the
