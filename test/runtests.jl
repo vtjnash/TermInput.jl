@@ -2,9 +2,9 @@
 #
 # `render` is a pure function of a widget and a size, `handle!` takes a key code
 # and returns an action, and the editing model underneath both is a function of
-# a buffer. Nothing reads stdin, so nothing needs a tty - and the one thing that
-# touches a real terminal, `suspend`, is asserted on the escape sequences it
-# writes to stdout.
+# a buffer. `readevent` reads any stream, and an `IOBuffer` is one, so nothing
+# needs a tty - and the one thing that touches a real terminal, `suspend`, is
+# asserted on the escape sequences it writes to stdout.
 #
 #     julia --project=. test/runtests.jl
 
@@ -16,7 +16,7 @@ import TermInput: ESCAPE, settext!, curline, move!, newline!, insertblock!, past
     backspace!, deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
     kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
-    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine
+    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT
 import InteractiveUtils
 
 @testset "TermInput" begin
@@ -173,6 +173,148 @@ end
     @test unshift(Int('j')) == Int('j')
     # Reaching the vocabulary either way is the same constant.
     @test Keys.K_LEFT === K_LEFT && Keys.C_W === C_W
+end
+
+@testset "the bytes that arrived are the key, and nothing is thrown away" begin
+    # What `readevent` hands over for anything past ASCII is the sequence as it
+    # came, packed - never a codepoint, which some of these do not have and
+    # others have one that was never typed.
+    raw(bs...) = readevent(IOBuffer(UInt8[bs...])).code
+    kept(bs...) = collect(codeunits(string(keychar(raw(bs...))))) == collect(UInt8[bs...])
+    @test kept(0xF4, 0x90, 0x80, 0x80)      # out of range: once exactly `K_LEFT`
+    @test kept(0xED, 0xA0, 0x80)            # a surrogate half
+    @test kept(0xC0, 0x80)                  # an overlong NUL
+    @test kept(0x80)                        # a continuation with no lead
+    @test kept(0xF8)                        # never a lead byte at all
+    @test kept(0xFF)
+    @test kept(0xC3, 0xA9) && kept(0xE2, 0x82, 0xAC) && kept(0xF0, 0x9F, 0x98, 0x80)
+
+    # One byte is its own code, so the bindings are what they always were.
+    @test raw(UInt8('j')) == Int('j')
+    @test readevent(IOBuffer("\r")) == KeyEvent(13)
+    # Above that is the sequence, in order - always past `0xFF`, since the lead
+    # byte of a multi-byte one is at least `0xC0` - and always below `K_BASE`.
+    @test raw(0xC3, 0xA9) == 0xC3A9
+    @test raw(0xF0, 0x9F, 0x98, 0x80) == 0xF09F9880
+    @test all(raw(b...) > 0xFF for b in ((0xC3,0xA9), (0xE2,0x82,0xAC), (0xF0,0x9F,0x98,0x80)))
+    @test all(raw(b...) < K_BASE for b in ((0xF4,0x90,0x80,0x80), (0xFF,), (0xF8,)))
+
+    # The framing is Julia's own, so a sequence stored in a buffer is read back
+    # out of it as the same one `Char`. `0xF8` leads nothing: those are four
+    # keys, not one, and Julia reads those bytes back as four characters.
+    io = IOBuffer(UInt8[0xF8, 0x80, 0x80, 0x80])
+    @test [readevent(io).code for _ in 1:4] == [0xF8, 0x80, 0x80, 0x80]
+    @test length(collect(String(UInt8[0xF8, 0x80, 0x80, 0x80]))) == 4
+    # A sequence whose continuation never came is its lead byte alone, and the
+    # byte that is not a continuation is left for the key it belongs to.
+    io = IOBuffer(UInt8[0xE0, UInt8('A')])
+    @test readevent(io).code == 0xE0
+    @test readevent(io) == KeyEvent(Int('A'))
+
+    # Typed into a buffer and taken back out, byte for byte - which is the whole
+    # claim, since that is where a pasted sequence actually ends up.
+    b = TextBuffer("abcd")
+    b.col = 3
+    insert!(b, keychar(raw(0xF4, 0x90, 0x80, 0x80)))
+    @test collect(codeunits(text(b))) ==
+          vcat(collect(codeunits("ab")), UInt8[0xF4,0x90,0x80,0x80], collect(codeunits("cd")))
+    @test length(collect(text(b))) == 5       # one character, not four
+    @test awidth(text(b)) == 5                # and the layout survives it
+end
+
+@testset "a terminal's bytes, read as events" begin
+    ev(s) = readevent(IOBuffer(s))
+    @test ev("j") == KeyEvent(Int('j'))
+    @test ev("\e") == KeyEvent(27)                   # bare escape
+    @test ev("\e[A") == KeyEvent(K_UP)
+    @test ev("\e[B") == KeyEvent(K_DOWN)
+    @test ev("\eOA") == KeyEvent(K_UP)               # application cursor mode
+    @test ev("\e[5~") == KeyEvent(K_PGUP)
+    @test ev("\e[6~") == KeyEvent(K_PGDN)
+    @test ev("\e[6;5~") == KeyEvent(K_PGDN)          # modified page-down
+    @test ev("\e[Z") == KeyEvent(K_STAB)             # shift-tab
+    # Alt/Meta has three spellings in the wild and all of them turn up.
+    @test ev("\eb") == KeyEvent(K_WORD_LEFT)         # Terminal.app
+    @test ev("\ef") == KeyEvent(K_WORD_RIGHT)
+    @test ev("\e\x7f") == KeyEvent(K_WORD_BACK)      # alt-backspace, everywhere
+    @test ev("\ed") == KeyEvent(K_WORD_KILL)         # alt-d, its mirror
+    @test ev("\ee") == KeyEvent(K_EDIT)              # the REPL's own key for it
+    @test ev("\e[1;3D") == KeyEvent(K_WORD_LEFT)     # CSI with a modifier
+    @test ev("\e[1;5C") == KeyEvent(K_WORD_RIGHT)    # ctrl counts as by-word too
+    @test ev("\e\e[D") == KeyEvent(K_WORD_LEFT)      # iTerm's Esc+
+    @test ev("\e[1;2D") == KeyEvent(K_LEFT)          # shift is not by-word
+    @test ev("\e[3~") == KeyEvent(K_DEL)
+    @test ev("\e[299~") == KeyEvent(K_NONE)          # unknown, but consumed
+    @test K_NONE < 0 && !printable(K_NONE)
+
+    # A sequence must not leave its tail behind to arrive as keystrokes: this
+    # is Shift-Tab, which `readkey` reads as Escape-then-`Z`.
+    io = IOBuffer("\e[Zq")
+    @test readevent(io) == KeyEvent(K_STAB)
+    @test readevent(io) == KeyEvent(Int('q'))
+
+    m = ev("\e[<0;40;12M")
+    @test m isa MouseEvent && m.kind === :press && m.x == 40 && m.y == 12
+    @test ev("\e[<0;40;12m").kind === :release
+    @test ev("\e[<32;40;12M").kind === :drag         # button 0 + motion
+    @test ev("\e[<64;5;5M").kind === :wheelup
+    @test ev("\e[<65;5;5M").kind === :wheeldown
+    @test ev("\e[<16;5;5M").mods == 4                # ctrl-click
+    # xterm.js's report for a terminal it cannot place: consumed whole, and
+    # not ended at the `N`, which left `aN;NaNm` to arrive as keys.
+    io = IOBuffer("\e[<0;NaN;NaNmq")
+    @test readevent(io) == KeyEvent(K_NONE)
+    @test readevent(io) == KeyEvent(Int('q'))
+    @test ev("\e[<0;40M") == KeyEvent(K_NONE)        # malformed
+    # Shift is the one modifier the vertical arrows carry a key of their own
+    # for, since it is what extends a selection. Alt and ctrl are not it.
+    @test ev("\e[1;2A") == KeyEvent(K_SUP)
+    @test ev("\e[1;2B") == KeyEvent(K_SDOWN)
+    @test ev("\e[1;5A") == KeyEvent(K_UP)
+
+    # A bracketed paste is one event and text, whatever keys it spells; the
+    # key after it is a key again.
+    io = IOBuffer("\e[200~q\tx\ry\e[201~j")
+    @test readevent(io) == PasteEvent("q\tx\ry")
+    @test readevent(io) == KeyEvent(Int('j'))
+    # And a terminal that went away mid-paste gives what did arrive.
+    @test ev("\e[200~half") == PasteEvent("half")
+end
+
+@testset "the terminal says dark or light, and what its background is" begin
+    ev = readevent(IOBuffer("\e[?997;1n"))
+    @test ev isa SchemeEvent && ev.dark && isempty(ev.rest) && ev.bg == ""
+    ev = readevent(IOBuffer("\e[?997;2n"))
+    @test ev isa SchemeEvent && !ev.dark
+    @test readevent(IOBuffer("\e[?997;3n")) == KeyEvent(K_NONE)
+    @test occursin(BG_QUERY, scheme_reports(true))
+    @test scheme_reports(false) == "\e[?2031l"
+    # The background colour by either terminator, and nothing of it left.
+    for t in ("\a", "\e\\")
+        io = IOBuffer(string("\e]11;rgb:1e1e/1e1e/1e1e", t, "j"))
+        ev = readevent(io)
+        @test ev isa SchemeEvent && ev.dark === nothing && ev.bg == "rgb:1e1e/1e1e/1e1e"
+        @test readevent(io) == KeyEvent(Int('j'))
+    end
+    # Another OSC is consumed and nothing, and the key after it is a key.
+    io = IOBuffer("\e]10;rgb:0/0/0\aj")
+    @test readevent(io) == KeyEvent(K_NONE) && readevent(io) == KeyEvent(Int('j'))
+    # An answer cut across two reads is still one answer, read to its end
+    # whenever the rest arrives, and none of it is keys.
+    r = Base.BufferStream()
+    write(r, "\e]11;rgb:1e1e")
+    t = @async readevent(r)
+    sleep(0.1)
+    @test !istaskdone(t)
+    write(r, "/1e1e/1e1e\e\\j")
+    ev = fetch(t)
+    @test ev isa SchemeEvent && ev.bg == "rgb:1e1e/1e1e/1e1e"
+    @test readevent(r) == KeyEvent(Int('j'))
+    # The two patterns are what a host reading raw input takes a report out
+    # of it with; what could not be passed on intact is not a colour.
+    @test match(SCHEME_REPORT, "ab\e[?997;1ncd")[1] == "1"
+    @test match(BG_REPORT, "\e]11;#000000\a")[1] == "#000000"
+    @test match(BG_REPORT, "\e]11;a b\a") === nothing
 end
 
 @testset "word motion" begin

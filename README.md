@@ -20,9 +20,13 @@ if handle!(ta, key) === :unhandled      # not an edit, so it is yours
 end
 ```
 
-Nothing here reads stdin, holds raw mode, or runs a loop. A host has all three
+No widget reads stdin, holds raw mode, or runs a loop. A host has all three
 already, and a widget that insisted on its own would be one you cannot put in
 the program you are writing.
+
+What a loop needs around the widgets is here too, for a host that has none of
+it yet - see [Driving a widget from a terminal](#driving-a-widget-from-a-terminal).
+Each helper is usable alone, and none of them owns the loop.
 
 Nor does it decide when you are finished. The keys a widget claims are the
 ones that edit its text or move its cursor, and what `^s` or `↵` or escape mean
@@ -55,6 +59,29 @@ A `Confirm` is the question a `Choice` of two would be the wrong answer to: the
 yes is already under the cursor there, and `↵` takes it. Here only the keys it
 names answer - `answer(c, k)` says which, 0 for no - and everything else is no,
 escape included unless the question names it.
+
+## Driving a widget from a terminal
+
+A widget takes one key code at a time. Where those come from is the host's,
+and a host that already reads keys - a multiplexer that has put every
+terminal's keys into one form, a GUI, a protocol of its own - produces the codes
+itself and takes none of what follows. A host that has nothing composes these.
+
+* **`readevent(io)`** reads one event from a terminal in raw mode: a
+  `KeyEvent` whose `code` is what `handle!` takes, a `PasteEvent` whose `text`
+  is what `paste!` takes, a `MouseEvent` whose `kind`, `x` and `y` are what
+  `click!` takes, or a `SchemeEvent`. It reads the dialect terminals speak by
+  default: the xterm keys and their modifiers, the three spellings of Alt,
+  SGR mouse reports and bracketed paste. A sequence it cannot place is
+  consumed whole and comes back as `K_NONE`, which nothing binds -
+  `REPL.TerminalMenus.readkey` returns Escape and leaves the tail to arrive
+  as keys, which is Shift-Tab reading as Escape-then-`Z`. It never decides
+  by the clock: a bare Escape is one with nothing already waiting behind it.
+* **`scheme_reports(on)`** asks the terminal to say whether it is dark or
+  light, now and on every change, and what its background is, and
+  `readevent` reads the answers as `SchemeEvent`s. What dark or light means to
+  the host is the host's; the reports have to be parsed here only so that
+  they do not arrive as keys.
 
 ## What it does that a `readline` does not
 
@@ -249,7 +276,7 @@ same widget. `InputBox` collects keystrokes; this edits text.
 | multi-line | `↵` appends a newline; no wrapping, no row mapping | soft wrap, and the cursor mapped onto the wrapped row |
 | finishing | `esc` quits the app; the text is read off the field | the host's - the key comes back and the host says what it meant |
 | measuring | `Panel`, so markup | display width |
-| input | `readkey` under `bytesavailable`, polled | one key code, from whatever loop the host has |
+| input | `readkey` under `bytesavailable`, polled | one key code, from whatever loop the host has - `readevent`'s, or its own |
 
 The last row is the one that decides the others: a widget cannot have a cursor
 until something can tell Left from Escape-then-`[`-then-`D`, and this one takes
@@ -262,7 +289,9 @@ specific enough that it is unlikely to have them already: the four widgets and
 their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
 `TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
 mouse and bracketed paste, the measuring (`awidth`, `astrip`, `afit`, `apad`,
-`amid`, `awrap`), `markdown_rows`, and the key vocabulary.
+`amid`, `awrap`), `markdown_rows`, the key vocabulary, and what reads it from a
+terminal: the events, `readevent` and `scheme_reports`. A host that has a
+`KeyEvent` of its own imports what it wants by name instead of `using`.
 
 Public and not exported is the rest of the API, which is either a name a host
 is likely to have already or one it uses once, where it sets a widget up:
@@ -281,6 +310,9 @@ is likely to have already or one it uses once, where it sets a widget up:
 * `MarkdownStyle`, `MDRow`, `highlight` and `highlighted_lines`, which a host
   drawing markdown builds, reads, extends and borrows
 * `ACTIONS`, which is what `handle!` answers
+* `BG_QUERY`, `SCHEME_REPORT` and `BG_REPORT`: the background question on its
+  own, and the two reports as patterns, for a host that reads some of its input
+  undecoded and takes a report out of it
 
 ```julia
 import TermInput: render, handle!, text
@@ -317,7 +349,7 @@ julia --project=. test/runtests.jl
 ```
 
 Everything, with no tty and no setup: `render` is pure, `handle!` takes a key
-code, and the one thing that touches a real terminal - `suspend` - is asserted
+code, `readevent` reads an `IOBuffer` as well as a terminal, and the one thing that touches a real terminal - `suspend` - is asserted
 on the escape sequences it writes. The `$EDITOR` path is driven through
 `InteractiveUtils.define_editor` rather than by installing an editor.
 

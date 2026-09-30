@@ -19,10 +19,16 @@ a string or an option. This is that, for a terminal.
         key == 19 && post(submission(ta))   # ...and this is what `^s` means
     end
 
-Nothing here reads stdin, holds raw mode, or runs a loop. A host has all three
+No widget reads stdin, holds raw mode, or runs a loop. A host has all three
 already, and a widget that insisted on its own would be one you cannot put in
 the program you are writing - so `render` is a pure function of the widget and a
 size, and `handle!` takes one key code.
+
+What a loop needs around the widgets is here as well, for a host that has none
+of it yet: `readevent` turns a terminal's bytes into keys, pastes and mouse
+reports. Each helper is usable alone and none of them owns the loop - what a key
+means, when to draw and what else wakes it stay the host's - and a host that
+already has a decoder takes none of them.
 
 Nor does it decide when you are finished. The keys it claims are the ones that
 *edit text*; what `^s` or `↵` or escape mean over the top of that is the host's,
@@ -34,6 +40,8 @@ embeds one.
   * `ansi.jl`      display widths, fitting and wrapping for text with escape
                    sequences in it
   * `keys.jl`      the key vocabulary: one code per key, as a submodule
+  * `events.jl`    `readevent`: a terminal's bytes as keys, pastes, mouse
+                   reports and colour-scheme reports
   * `buffer.jl`    `TextBuffer` - lines, a cursor, and readline's operations,
                    with no view attached
   * `border.jl`    the box: its characters, and the weights it is painted in
@@ -65,13 +73,15 @@ export suspend, compose_external, mouse_reporting, bracketed_paste
 export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer,
        listwindow, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
 export markdown_rows
-# The key vocabulary is a host's to produce and every widget's to bind, so it is
-# re-exported rather than left behind the submodule: a program that reads a
-# keystroke has to be able to say `K_LEFT` without knowing where it lives.
+export KeyEvent, PasteEvent, MouseEvent, SchemeEvent, readevent, scheme_reports
+# The key vocabulary is `readevent`'s or a host's to produce and every widget's
+# to bind, so it is re-exported rather than left behind the submodule: a program
+# that reads a keystroke has to be able to say `K_LEFT` without knowing where it
+# lives.
 export Keys
 export K_BASE, K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP,
        K_PGDN, K_STAB, K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_WORD_KILL,
-       K_EDIT, K_SUP, K_SDOWN, printable, keychar, keycode, unshift
+       K_EDIT, K_SUP, K_SDOWN, K_NONE, printable, keychar, keycode, unshift
 export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
        C_W, C_Y
 
@@ -86,13 +96,15 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         newline!, insertblock!, backspace!, deletechar!, killline!,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
-        DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, highlighted_lines"""))
+        DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, highlighted_lines,
+        BG_QUERY, SCHEME_REPORT, BG_REPORT"""))
 end
 
 include("ansi.jl")
 include("keys.jl")
 using .Keys
 
+include("events.jl")
 include("buffer.jl")
 include("border.jl")
 include("suspend.jl")

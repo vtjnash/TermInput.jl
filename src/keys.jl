@@ -5,13 +5,13 @@ The key vocabulary: one code per key, whether or not the key stands for a
 character someone typed.
 
 A submodule because it is the piece with the fewest ties to anything else. It
-is the widgets' binding table and nothing more - what turns bytes from a
-terminal *into* these codes is the host's, and stays the host's. A host already
-has an input loop of its own, and only the host knows what is in front of it:
-a terminal whose dialect it has to read, or a multiplexer that has already put
-every terminal's keys into one form. This package's job is what happens after
-a key has been read. `handle!` takes one of these codes, so producing them is
-the whole of what a host has to do to drive a widget.
+is the widgets' binding table: `handle!` takes one of these codes, so producing
+them is the whole of what a host has to do to drive a widget.
+
+[`readevent`](@ref) produces them from a terminal's bytes. A host that reads
+keys some other way - a multiplexer that has already put every terminal's keys
+into one form, a protocol `readevent` does not speak, something that is not a
+terminal at all - produces them itself, and the widgets cannot tell.
 
 `REPL.TerminalMenus.readkey` is what people reach for and it is not enough on
 its own: it cannot see a mouse report at all, and it drops any sequence it does
@@ -22,7 +22,7 @@ module Keys
 
 export K_BASE, K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP,
        K_PGDN, K_STAB, K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_WORD_KILL,
-       K_EDIT, K_SUP, K_SDOWN, printable, keychar, keycode, unshift
+       K_EDIT, K_SUP, K_SDOWN, K_NONE, printable, keychar, keycode, unshift
 export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
        C_W, C_Y
 
@@ -117,6 +117,16 @@ none passes them through [`unshift`](@ref), and every widget here does.
 """
 K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP, K_PGDN, K_STAB,
 K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_WORD_KILL, K_EDIT, K_SUP, K_SDOWN
+
+"""
+    K_NONE
+
+A sequence that was read whole and is no key: one a decoder could frame and
+not place. Consumed so that its tail does not arrive as keys, and bound by
+nothing - a widget answers `:unhandled`, and a host should do nothing with it.
+Below every other code, and not bytes anybody could type.
+"""
+const K_NONE = -1
 
 """
     printable(k) -> Bool
