@@ -36,25 +36,21 @@ embeds one.
   * `keys.jl`      the key vocabulary: one code per key, as a submodule
   * `buffer.jl`    `TextBuffer` - lines, a cursor, and readline's operations,
                    with no view attached
-  * `border.jl`    the box, in Term's box characters and the theme's style
+  * `border.jl`    the box: its characters, and the weights it is painted in
   * `suspend.jl`   handing the terminal to `\$EDITOR` and taking it back
   * `textarea.jl`  `TextArea`, the multi-line composer
   * `lineinput.jl` `LineInput`, one line in a box
   * `choice.jl`    `Choice`, one of a list narrowed by typing, and `Confirm`,
                    a question only named keys answer
 
-## What Term gives it
+## What it measures with
 
-The border follows `Term.TERM_THEME[].box`, so a composer opened over a screen
-of `Term.Panel`s is bordered the way they are. The measuring is this package's
-own: `Panel` measures markup, so a title a host styled with raw SGR is counted
-as characters and wrapped - and worse in the other direction, a buffer full of
-prose is *not* markup, so a `{` somebody typed is read as a tag and silently
-deleted.
+Its own. `awidth`, `afit`, `apad` and `awrap` count display columns in text
+that already has escapes in it, which is what a host hands over: a title it
+styled, a note, a buffer somebody typed braces into.
 """
 module TermInput
 
-import Term
 import REPL
 import InteractiveUtils
 
@@ -85,7 +81,8 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         ESCAPE, oneline, notetext, drawfield, bufferrows, settext!, curline, move!,
         newline!, insertblock!, backspace!, deletechar!, killline!,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
-        wordstart, wordend, boxstyle, dialogbox, centred, CHROME, DIALOG_WIDTH"""))
+        wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
+        DIALOG_WIDTH"""))
 end
 
 include("ansi.jl")

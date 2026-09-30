@@ -172,7 +172,7 @@ styling and never text.
 
 ## Steps
 
-1. [ ] **TermInput owns its box characters.** `boxstyle()` reads
+1. [x] **TermInput owns its box characters.** `boxstyle()` reads
        `Term.Boxes.BOXES` by `TERM_THEME[].box`; the handful of boxes a theme
        can name become a table here - the shipped themes name only `ROUNDED`
        (`box`) and `MINIMAL_HEAVY_HEAD` (`tb_box`), and `SQUARE`, `HEAVY` and
@@ -180,6 +180,11 @@ styling and never text.
        box is an argument or a field of `CHROME`, not Term's theme. Term
        leaves TermInput's `Project.toml` and the README's "What Term gives
        it" section goes. This is worth doing on its own.
+       *Landed as* `Box`, `BoxLine` and `BOXES` (the five, with `head`,
+       `head_row` and `row` for a table and no footer lines), with the box a
+       field of `CHROME`, so a host sets it beside the weights;
+       `boxstyle(name)` looks one up and falls back to `ROUNDED`. A host
+       that assigns `CHROME[]` gives all five fields now.
 2. [ ] **`src/markdown.jl`**: `markdown_rows`, `MDRow`, `MarkdownStyle`, the
        elements above.
 3. [ ] **Tests, with no tty**: one per element, per nesting (a table in a

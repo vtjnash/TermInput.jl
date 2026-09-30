@@ -16,7 +16,7 @@ import TermInput: ESCAPE, settext!, curline, move!, newline!, insertblock!, past
     backspace!, deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
     kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
-    DOUBLECLICK, oneline, column
+    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine
 import InteractiveUtils
 
 @testset "TermInput" begin
@@ -774,11 +774,9 @@ end
           Set(ACTIONS) == Set([:ok, :unhandled])
 end
 
-@testset "the box comes from Term's theme" begin
-    # The glyphs are Term's, so a widget drawn beside a `Term.Panel` is
-    # bordered the way it is - and a theme naming a box that is not there is a
-    # different corner, not an exception.
-    import Term
+@testset "the box comes from CHROME" begin
+    # The glyphs are a table here, and the one drawn is `CHROME[].box` - and a
+    # name that is not there is a different corner, not an exception.
     b = dialogbox(80)
     @test occursin(string(boxstyle().top.left), b.head("title"))
     @test occursin("title", astrip(b.head("title")))
@@ -791,7 +789,7 @@ end
     @test awidth(b.head("t"^300)) == b.pad + b.bw
     # The rows a widget draws are painted in the weights its border was, so a
     # box given weights of its own is one box and not two.
-    plain = (strong = "", quiet = "", focus = "", reset = "")
+    plain = (strong = "", quiet = "", focus = "", reset = "", box = BOXES.ROUNDED)
     @test dialogbox(80; chrome = plain).chrome === plain
     old = CHROME[]
     try
@@ -804,14 +802,21 @@ end
         CHROME[] = old
     end
 
-    old = Term.TERM_THEME[].box
+    old = CHROME[]
     try
-        Term.TERM_THEME[].box = :SQUARE
-        @test occursin(string(Term.Boxes.BOXES.SQUARE.top.left), dialogbox(80).head("t"))
-        Term.TERM_THEME[].box = :NOT_A_BOX
-        @test boxstyle() === Term.Boxes.BOXES.ROUNDED
+        CHROME[] = merge(old, (box = BOXES.SQUARE,))
+        @test occursin("┌", dialogbox(80).head("t"))
+        @test occursin("└", dialogbox(80).foot())
+        @test occursin("╔", dialogbox(80; box = boxstyle(:DOUBLE)).top())
     finally
-        Term.TERM_THEME[].box = old
+        CHROME[] = old
+    end
+    @test boxstyle(:NOT_A_BOX) === BOXES.ROUNDED
+    @test boxstyle("heavy") === BOXES.HEAVY
+    # Every box has all six lines, four characters each, one column apiece.
+    for b in BOXES, f in (:top, :head, :head_row, :mid, :row, :bottom)
+        l = getfield(b, f)
+        @test all(c -> textwidth(c) == 1, (l.left, l.mid, l.vertical, l.right))
     end
 
     # Every frame is `h` rows of exactly `w` columns, whatever went into it.

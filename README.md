@@ -148,21 +148,22 @@ Two-key chords are the reason several of those are skipped rather than absent:
 nothing here holds state between keystrokes, so `^x`-anything would be the first
 thing to need it.
 
-## What Term gives it
+## The box, and the measuring
 
-The border is drawn with Term's box characters, following
-`Term.TERM_THEME[].box` - so a composer opened over a screen of `Term.Panel`s
-is bordered the way they are, and changing the theme moves all of it.
+The border is drawn from `BOXES`, this package's own table of box characters -
+`ROUNDED`, `SQUARE`, `HEAVY`, `DOUBLE` and `MINIMAL_HEAVY_HEAD`, by the names
+Term gives them - and which one is `CHROME[].box`, set beside the weights it is
+painted in. Nothing here depends on Term.
 
-The measuring is this package's own, and deliberately so. `Panel` measures
-*markup*, which is wrong here in both directions at once. A title or a note a
-host has already styled with raw SGR is counted as characters, so a line that
-fits is wrapped and the panel elides its own tail. And a buffer full of prose is
-not markup at all, so a `{` somebody typed is read as a tag and silently
-deleted - which is the more damaging half, because what is lost is what was
-written. So `awidth`, `afit`, `apad` and `awrap` work against real display
-widths, and Term supplies the glyphs. They are exported, since a host laying a
-widget out beside something else has the same problem one step out.
+The measuring is this package's own, and deliberately so. Term's `Panel`
+measures *markup*, which is wrong here in both directions at once. A title or a
+note a host has already styled with raw SGR is counted as characters, so a line
+that fits is wrapped and the panel elides its own tail. And a buffer full of
+prose is not markup at all, so a `{` somebody typed is read as a tag and
+silently deleted - which is the more damaging half, because what is lost is
+what was written. So `awidth`, `afit`, `apad` and `awrap` work against real
+display widths. They are exported, since a host laying a widget out beside
+something else has the same problem one step out.
 
 ## How this differs from `Term.Live`'s `InputBox`
 
@@ -202,7 +203,8 @@ is likely to have already or one it uses once, where it sets a widget up:
   `insertblock!`, `backspace!`, `deletechar!`, `killline!`, `killtostart!`,
   `deleteword!`, `killwordforward!`, `kill!`, `yank!`, `transpose!`,
   `wordstart`, `wordend`, `bufferrows`
-* the box - `dialogbox`, `centred`, `boxstyle`, `CHROME`, `DIALOG_WIDTH` - and
+* the box - `dialogbox`, `centred`, `boxstyle`, `Box`, `BoxLine`, `BOXES`,
+  `CHROME`, `DIALOG_WIDTH` - and
   what a host drawing a field or a list of its own shares with the widgets:
   `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
   `ESCAPE`
@@ -234,8 +236,7 @@ own to - and a `maxwidth`, `DIALOG_WIDTH` but for the `TextArea`.
 | `ta.focused` | whether a `TextArea` draws its cursor. Only there, because it is the one widget a host draws beside something else; a dialog is always the thing that has the keyboard |
 | `v.hint` | those hints, which name only the keys the widget owns; a host has to add its own |
 | `isblank(v)` | whether there is anything in it - what to ask before deciding what escape costs, or whether an empty one may be sent |
-| `TERM_THEME[].box` | Term's, and the box these are drawn in |
-| `CHROME[]` | the weights it is painted in: `strong`, `quiet`, `focus` (a `Choice`'s cursor) and `reset` |
+| `CHROME[]` | the weights it is painted in - `strong`, `quiet`, `focus` (a `Choice`'s cursor) and `reset` - and the `box` it is drawn with, one of `BOXES` |
 
 ## Tests
 

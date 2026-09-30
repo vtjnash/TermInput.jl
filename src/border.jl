@@ -1,60 +1,120 @@
 # The box a widget is drawn in.
 #
-# This is where the package is a Term plugin rather than a text editor: the
-# characters come from Term's own box vocabulary and default to the box the
-# current theme uses, so a text area opened over a screen full of `Term.Panel`s
-# is bordered the way they are - change `TERM_THEME[].box` and all of it
-# follows.
+# The characters are this package's own table, a handful of the boxes a
+# terminal program is drawn in, and the one to use is a field of `CHROME` beside
+# the weights it is painted in - a host with a theme sets both in one place, and
+# every widget and every table follows.
 #
-# What does not come from Term is the *measuring*, for two reasons that pull in
-# opposite directions. `Panel` measures markup, so a title a host has already
-# styled with raw SGR is counted as characters and the panel wraps a line that
-# fits. And a buffer full of prose is *not* markup, so the braces in it are
+# They used to be Term's, read off `Term.TERM_THEME[].box`, so that a composer
+# opened over a screen of `Term.Panel`s was bordered the way they were. That was
+# one global read mid-render for five tables of glyphs, and it cost every host
+# the whole of Term to have them.
+#
+# The *measuring* was never Term's, for two reasons that pull in opposite
+# directions. `Panel` measures markup, so a title a host has already styled
+# with raw SGR is counted as characters and the panel wraps a line that fits.
+# And a buffer full of prose is *not* markup, so the braces in it are
 # somebody's typing rather than a tag - which is the failure the other way
 # round, and the more damaging of the two, because it silently deletes what was
 # typed. So the rows are laid out here against real display widths - see
-# `ansi.jl` - and Term supplies the glyphs.
-
-import Term
-import Term.Boxes: BOXES
+# `ansi.jl`.
 
 """
-    boxstyle() -> Term.Boxes.Box
+    BoxLine(left, mid, vertical, right)
 
-The box style to draw with, following Term's theme unless told otherwise.
-
-The theme's box name, or `ROUNDED` if it names one that is not there - a widget
-that throws because somebody set an unknown box is a worse answer than a widget
-with a different corner.
+One line of a [`Box`](@ref): the character at each end, the one that fills
+between them, and the one where a column rule crosses it.
 """
-boxstyle() = get(BOXES, Term.TERM_THEME[].box, BOXES.ROUNDED)
+struct BoxLine
+    left::Char
+    mid::Char
+    vertical::Char
+    right::Char
+end
+BoxLine(s::AbstractString) = BoxLine(collect(s)...)
 
 """
-    CHROME[] = (strong = ..., quiet = ..., focus = ..., reset = ...)
+    Box(name, top, head, head_row, mid, row, bottom)
 
-The four weights the chrome of a widget is drawn in, for a host to set: three
-kinds of emphasis and what ends them.
+The characters of a box, a [`BoxLine`](@ref) for each kind of line in it:
 
-The characters come from Term's theme (`boxstyle` above); these are what they
-are *painted* with, and they are a `Ref` for the same reason the box is a
-theme: a host that has its own colours - a dashboard with a theme file, say -
-has one place to say so rather than an argument to thread through every widget
-it draws.
+    ╭─┬╮ top
+    │ ││ head      the cells of a table's header
+    ├─┼┤ head_row  the rule under the header
+    │ ││ mid       every other line inside the box
+    ├─┼┤ row       a rule between two rows of a table
+    ╰─┴╯ bottom
+
+A widget's border uses `top`, `mid` and `bottom`; a table uses all six.
+"""
+struct Box
+    name::Symbol
+    top::BoxLine
+    head::BoxLine
+    head_row::BoxLine
+    mid::BoxLine
+    row::BoxLine
+    bottom::BoxLine
+end
+Box(name::Symbol, rows::AbstractString) = Box(name, (BoxLine(r) for r in split(rows, '\n'))...)
+
+"""
+    BOXES
+
+The boxes there are, by name: `ROUNDED` (the default), `SQUARE`, `HEAVY`,
+`DOUBLE`, and `MINIMAL_HEAVY_HEAD` - no outer edge, a heavy rule under the
+header, which is how a table reads when it is not meant to look like a
+dialog. The names are Term's, so a theme written for Term names the same box
+here.
+"""
+const BOXES = (
+    ROUNDED = Box(:ROUNDED, "╭─┬╮\n│ ││\n├─┼┤\n│ ││\n├─┼┤\n╰─┴╯"),
+    SQUARE = Box(:SQUARE, "┌─┬┐\n│ ││\n├─┼┤\n│ ││\n├─┼┤\n└─┴┘"),
+    HEAVY = Box(:HEAVY, "┏━┳┓\n┃ ┃┃\n┣━╋┫\n┃ ┃┃\n┣━╋┫\n┗━┻┛"),
+    DOUBLE = Box(:DOUBLE, "╔═╦╗\n║ ║║\n╠═╬╣\n║ ║║\n╠═╬╣\n╚═╩╝"),
+    MINIMAL_HEAVY_HEAD = Box(:MINIMAL_HEAVY_HEAD, "  ╷ \n  │ \n╺━┿╸\n  │ \n╶─┼╴\n  ╵ "),
+)
+
+"""
+    boxstyle() -> Box
+    boxstyle(name) -> Box
+
+The box to draw with: `CHROME[].box`, or the one in [`BOXES`](@ref) called
+`name`, and `ROUNDED` if there is none by that name - a widget that throws
+because somebody named an unknown box is a worse answer than a widget with a
+different corner. A host that wants to say the name was wrong asks
+`haskey(BOXES, name)` first.
+"""
+boxstyle() = CHROME[].box
+boxstyle(name::Symbol) = get(BOXES, name, BOXES.ROUNDED)
+boxstyle(name::AbstractString) = boxstyle(Symbol(uppercase(name)))
+
+"""
+    CHROME[] = (strong = ..., quiet = ..., focus = ..., reset = ..., box = ...)
+
+How the chrome of a widget is drawn, for a host to set: three kinds of
+emphasis, what ends them, and the box.
+
+They are a `Ref` because a host that has its own colours - a dashboard with a
+theme file, say - has one place to say so rather than an argument to thread
+through every widget it draws.
 
   * `strong` a title, and a border that has the keyboard
   * `quiet`  a border that does not, and the note and hint lines around it
   * `focus`  the option under the cursor in a `Choice`
   * `reset`  what ends any of them
+  * `box`    the [`Box`](@ref) the border is drawn with, one of [`BOXES`](@ref)
 
-The defaults are bold, dim, reverse video and a reset. A host that sets all
-four to `""` gets chrome with no escapes in it at all, which is what a program
-drawing plain text wants and what a pipe wants.
+The defaults are bold, dim, reverse video, a reset and `ROUNDED`. A host that
+sets the four weights to `""` gets chrome with no escapes in it at all, which is
+what a program drawing plain text wants and what a pipe wants.
 
 Not in here: the block that marks where the cursor is in a `TextArea`. Reverse
 video there is not emphasis, it is the only thing saying where typing will go,
 and a host that turned its colours off would otherwise lose it.
 """
-const CHROME = Ref((strong = "\e[1m", quiet = "\e[2m", focus = "\e[7m", reset = "\e[0m"))
+const CHROME = Ref((strong = "\e[1m", quiet = "\e[2m", focus = "\e[7m", reset = "\e[0m",
+                    box = BOXES.ROUNDED))
 
 """
     DIALOG_WIDTH
