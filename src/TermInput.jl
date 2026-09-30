@@ -42,6 +42,8 @@ embeds one.
 
   * `ansi.jl`      display widths, fitting and wrapping for text with escape
                    sequences in it
+  * `rows.jl`      the same for a row of faces - an annotated string - with
+                   pieces of it drawn verbatim
   * `keys.jl`      the key vocabulary: one code per key, as a submodule
   * `events.jl`    `readevent`: a terminal's bytes as keys, pastes, mouse
                    reports and colour-scheme reports
@@ -77,6 +79,7 @@ import Markdown
 # Exported: what a host driving a widget writes on every call, with names
 # specific enough that it is unlikely to have them already.
 export awidth, astrip, afit, apad, amid, awrap
+export rowwidth, rowfit, rowpad, rowmid, rowwrap, rowcat, faced
 export TextBuffer
 export suspend, compose_external, mouse_reporting, bracketed_paste
 export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer,
@@ -109,10 +112,13 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
         DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, codemime,
         highlighted_lines,
-        BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal"""))
+        BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal,
+        Row, row, rowhead, rowtail, rowlines, rowwraplines, overlaid, linked,
+        verbatim, wrapspans"""))
 end
 
 include("ansi.jl")
+include("rows.jl")
 include("keys.jl")
 using .Keys
 

@@ -347,6 +347,19 @@ what was written. So `awidth`, `afit`, `apad` and `awrap` work against real
 display widths. They are exported, since a host laying a widget out beside
 something else has the same problem one step out.
 
+A row can also be faces rather than escapes: a `Row`, which is an
+`AnnotatedString{String}` with StyledStrings `Face`s over ranges of it, and
+which StyledStrings writes. `rowwidth`, `rowfit`, `rowpad`, `rowmid`,
+`rowhead`, `rowtail`, `rowwrap` and `rowwraplines` are the same measures for
+one, and keep the faces over whatever they keep: a cut through a bold title
+ends in a bold `…`, and a face across a wrap is on both rows, each closing it.
+`faced(s, face)` draws `s` in a face, under the faces it has, `overlaid` lays
+one over a range, `linked` makes it a hyperlink, and `rowcat` is `*` for rows,
+which on 1.10 drops the faces. And `verbatim(text, w)` is a piece of a row
+that is somebody else's escapes, drawn as it is and `w` wide - a program's
+screen as a multiplexer gave it: its width is never measured and nothing cuts
+or wraps inside it.
+
 ## How this differs from `Term.Live`'s `InputBox`
 
 Term has a widget of its own, and the honest summary is that they are not the
@@ -374,7 +387,8 @@ specific enough that it is unlikely to have them already: the four widgets and
 their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
 `TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
 mouse and bracketed paste, the measuring (`awidth`, `astrip`, `afit`, `apad`,
-`amid`, `awrap`), `markdown_rows`, the key vocabulary, and what reads it from a
+`amid`, `awrap`, and `rowwidth`, `rowfit`, `rowpad`, `rowmid`, `rowwrap`,
+`rowcat` and `faced` for rows of faces), `markdown_rows`, the key vocabulary, and what reads it from a
 terminal: the events, `readevent`, `scheme_reports`, `enter_terminal`,
 `leave_terminal`, `InputReader`, `arm!`, `frame_bytes` and `input_waiting`. A host that has a
 `KeyEvent` of its own imports what it wants by name instead of `using`.
@@ -392,7 +406,9 @@ is likely to have already or one it uses once, where it sets a widget up:
   `CHROME`, `DIALOG_WIDTH` - and
   what a host drawing a field or a list of its own shares with the widgets:
   `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
-  `ESCAPE`
+  `ESCAPE`, and for rows of faces `Row`, `row`, `rowhead`, `rowtail`,
+  `rowlines`, `rowwraplines`, `overlaid`, `linked`, `verbatim` and the break
+  they wrap at, `wrapspans`
 * `MarkdownStyle`, `MDRow`, `highlight`, `codemime` and `highlighted_lines`,
   which a host drawing markdown builds, reads, extends and borrows
 * `ACTIONS`, which is what `handle!` answers

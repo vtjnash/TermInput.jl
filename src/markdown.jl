@@ -15,30 +15,13 @@
 # never painted, and a span that wraps is closed on one row and opened again on
 # the next with no state carried between them. An empty face writes nothing.
 #
-# Not `awrap`, which wraps a string with escapes already in it: it carries the
-# codes in force across a break but does not close them at the end of the row,
-# and it cannot say which piece of the row was which run. Wrapping runs is the
-# same greedy break at the last space, and a word wider than the row split by
-# columns, with graphemes kept whole.
+# The break is `rowwrap`'s, `wrapspans`: the greedy break at the last space, and
+# a word wider than the row split by columns, with graphemes kept whole. Only
+# the pieces differ - runs here, which are styled when the row is emitted.
 
 import Markdown
 import StyledStrings
 import StyledStrings: Face
-
-"No style: the face that writes nothing."
-const NOSTYLE = Face()
-
-# The stdlib's from 1.11, and the package's on 1.10, where an annotation is
-# still a pair rather than a named tuple.
-@static if isdefined(Base, :AnnotatedString)
-    const AnnotatedString = Base.AnnotatedString
-    faced(r::UnitRange{Int}, f::Face) = (region = r, label = :face, value = f)
-    const Faced = typeof(faced(1:0, NOSTYLE))
-else
-    const AnnotatedString = StyledStrings.AnnotatedString
-    faced(r::UnitRange{Int}, f::Face) = (r, :face => f)
-    const Faced = Tuple{UnitRange{Int},Pair{Symbol,Any}}
-end
 
 """
     MarkdownStyle(; h1, …, faces)
@@ -194,14 +177,14 @@ so a code span is one background with its backticks dimmed inside it, not
 three - and turns off whatever a close took with it that is still wanted.
 Nothing is open at the end of the row."""
 function emit(line::Line)
-    anns = Faced[]
+    anns = Annot[]
     io = IOBuffer()
     for r in line
         isempty(r.text) && continue
         i = position(io)
         write(io, r.text)
         isempty(r.styles) ||
-            push!(anns, faced(i+1:position(io), foldl(merge, r.styles)))
+            push!(anns, annot(i+1:position(io), :face, foldl(merge, r.styles)))
     end
     text = String(take!(io))
     isempty(anns) && return text
@@ -221,33 +204,7 @@ function wraprun(line::Line, w::Int; hard::Bool = false)
     for (k, r) in enumerate(line), g in Base.Unicode.graphemes(r.text)
         push!(gs, String(g)); push!(gw, textwidth(g)); push!(gr, k)
     end
-    n = length(gs)
-    spans = UnitRange{Int}[]
-    rs, col, bp = 1, 0, 0                # row start, its width, a space in it
-    i = 1
-    while i <= n
-        if col + gw[i] > w && i > rs
-            !hard && gs[i] == " " && (bp = i)   # a word that ends at the edge
-            if !hard && bp > rs
-                push!(spans, rs:bp-1)
-                rs = bp + 1
-                while rs <= n && gs[rs] == " "   # the spaces the break left
-                    rs += 1
-                end
-                i = max(i, rs)
-                col = sum(@view(gw[rs:i-1]); init = 0)
-            else
-                push!(spans, rs:i-1)
-                rs = i; col = 0
-            end
-            bp = 0
-            continue
-        end
-        gs[i] == " " && (bp = i)
-        col += gw[i]
-        i += 1
-    end
-    (rs <= n || isempty(spans)) && push!(spans, rs:n)
+    spans = wrapspans(gw, Bool[g == " " for g in gs], w; hard)
     rows = Line[]
     for sp in spans
         row = Run[]

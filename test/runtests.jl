@@ -17,6 +17,7 @@ import TermInput: ESCAPE, settext!, curline, move!, newline!, insertblock!, past
     kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
     DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal
+import TermInput: Row, verbatim, linked, overlaid, rowhead, rowtail, rowlines, rowwraplines
 import InteractiveUtils
 import StyledStrings: Face, SimpleColor
 
@@ -135,6 +136,86 @@ end
 
     # Degenerate widths do not loop or throw.
     @test awrap("anything", 1) == ["anything"]
+end
+
+@testset "a row of faces is measured, cut and wrapped by its text" begin
+    # What StyledStrings writes for a row, which is what a terminal is sent.
+    out(r) = sprint(print, r; context = :color => true)
+    b, red = Face(weight = :bold), Face(foreground = SimpleColor(:red))
+    # A face takes no columns: the width is the text's.
+    @test rowwidth("plain") == 5 && rowwidth(faced("green", red)) == 5
+    @test rowwidth(faced("日本", b)) == 4
+    # A verbatim piece is as wide as it says, whatever is in it: somebody
+    # else's escapes, never measured.
+    v = verbatim("\e[31mxyz\e[0m", 3)
+    @test rowwidth(v) == 3 && rowwidth(rowcat("ab", v, "cd")) == 7
+    @test out(rowcat("ab", v)) == "ab\e[31mxyz\e[0m"
+    # Fitting and padding, as for plain text.
+    @test String(rowfit("abcdefgh", 4)) == "abc…" && String(rowfit("abc", 10)) == "abc"
+    @test String(rowfit("abc", 0)) == "" && String(rowpad("ab", 5)) == "ab   "
+    @test rowwidth(rowpad(faced("abcdefgh", b), 5)) == 5
+    # A cut keeps the faces over what it kept, and the mark is in the face it
+    # cut through; plain text cut short is still plain.
+    f = rowfit(faced("abcdefgh", b), 4)
+    @test out(f) == out(faced("abc…", b))
+    @test out(rowfit("abcdefgh", 4)) == "abc…"
+    @test out(rowcat("ab", faced("cdefgh", red))) != out(rowcat("ab", "cdefgh"))
+    # The padding carries no face, so nothing is painted past the text.
+    @test endswith(out(rowpad(faced("ab", Face(background = SimpleColor(:red))), 5)), "   ")
+    # A verbatim piece is never cut into: it goes whole or not at all.
+    r = rowcat("ab", v, "cd")
+    @test String(rowhead(r, 4)) == "ab" && String(rowhead(r, 5)) == String(rowcat("ab", v))
+    @test String(rowtail(r, 4)) == "cd" && String(rowfit(r, 4)) == "ab…"
+    @test rowwidth(rowpad(r, 4)) <= 4 && rowwidth(rowpad(r, 9)) == 9
+    # Eliding in the middle, as `amid` does.
+    a = "users/someone/tsa-tryheld-state"
+    @test String(rowmid(a, 26)) == amid(a, 26) && rowwidth(rowmid(a, 26)) == 26
+    for w in 1:12
+        @test rowwidth(rowmid(a, w)) <= w
+    end
+    @test rowwidth(rowmid("日本語のブランチ名前です", 11)) <= 11
+    # Wrapping breaks at the last space that fits and drops it; a run wider
+    # than the row is split, graphemes whole.
+    @test String.(rowwrap("guard the remaining raw stderr writes that gate cleanup", 40)) ==
+          ["guard the remaining raw stderr writes", "that gate cleanup"]
+    @test String.(rowwrap("x"^10, 4)) == ["xxxx", "xxxx", "xx"]
+    @test String.(rowwrap("ab cd", 4; hard = true)) == ["ab c", "d"]
+    @test String.(rowwrap("e\u0301e\u0301e\u0301", 2)) == ["e\u0301e\u0301", "e\u0301"]
+    # A face across the break is on both rows, and each row ends it: nothing
+    # is open where a row ends, so padding it paints nothing.
+    w = rowwrap(rowcat("aa ", faced("bbb ccc", red), " dd"), 6)
+    @test String.(w) == ["aa bbb", "ccc dd"]
+    @test out(w[1]) == out(rowcat("aa ", faced("bbb", red)))
+    @test out(w[2]) == out(rowcat(faced("ccc", red), " dd"))
+    # So is a link: every row's link is closed on that row.
+    lk = rowwrap(rowcat("see ", linked("the linked words here", "https://x.example/a"), " after"), 12)
+    @test length(lk) >= 3 && all(rowwidth(l) <= 12 for l in lk)
+    @test all(count("\e]8;;https", out(l)) == count("\e]8;;\e\\", out(l)) for l in lk)
+    @test count(l -> occursin("\e]8;;https", out(l)), lk) >= 2
+    # A verbatim piece wider than the row is a row of its own, not split.
+    vw = rowwrap(rowcat("a ", verbatim("\e[1mxxxxxx", 6), " b"), 4)
+    @test String.(vw) == ["a", "\e[1mxxxxxx", "b"]
+    # Lines, each wrapped; a newline is on no row.
+    @test String.(rowwraplines("one two\nthree", 4)) == ["one", "two", "thre", "e"]
+    @test String.(TermInput.rowlines(faced("a\n\nb", b))) == ["a", "", "b"]
+    @test out(TermInput.rowlines(faced("a\nb", b))[2]) == out(faced("b", b))
+    # Nothing lost or gained by a wrap but the spaces it broke at.
+    for t in ("short", "", "a b c d e f g h i j k l m n o p q r s t",
+              "https://github.com/JuliaLang/julia/pull/62841#issuecomment-372112478 see")
+        for w in (5, 12, 40)
+            rs = rowwrap(t, w)
+            @test all(rowwidth(l) <= w for l in rs)
+            @test replace(join(String.(rs)), " " => "") == replace(t, " " => "")
+        end
+    end
+    # An empty face is no annotation, and so no escape at all.
+    @test out(faced("plain", Face())) == "plain"
+    # Over and under: a face laid under a row loses to the row's own where
+    # both say a colour; one laid over wins.
+    bg(c) = Face(background = SimpleColor(c))
+    word = rowcat("a ", faced("b", bg(:red)))
+    @test out(faced(word, bg(:blue))) == out(rowcat(faced("a ", bg(:blue)), faced("b", bg(:red))))
+    @test out(TermInput.overlaid(word, 1:3, bg(:blue))) == out(faced("a b", bg(:blue)))
 end
 
 @testset "a key code is the bytes that arrived, and nothing is thrown away" begin
