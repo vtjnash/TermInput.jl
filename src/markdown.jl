@@ -171,13 +171,59 @@ end
 
 const Line = Vector{Run}
 
+"""What an escape turns on, or with `off`, what it turns off: the attributes
+of its SGR parameters, `:all` for a reset. `nothing` for an escape that is not
+SGR alone - a hyperlink, say - which only its own close is known to end."""
+function sgrattrs(e::AbstractString; off::Bool = false)
+    attrs = Symbol[]
+    rest = e
+    while !isempty(rest)
+        m = match(r"^\e\[([0-9;:]*)m", rest)
+        m === nothing && return nothing
+        ps = split(m.captures[1], ';')
+        k = 1
+        while k <= length(ps)
+            p = ps[k]
+            n = isempty(p) ? 0 : something(tryparse(Int, first(split(p, ':'))), -1)
+            a = off ? get(SGR_OFF, n, nothing) : get(SGR_ON, n, nothing)
+            a === nothing || push!(attrs, a)
+            if n in (38, 48, 58) && !occursin(':', p) && k < length(ps)
+                k += ps[k+1] == "5" ? 2 : ps[k+1] == "2" ? 4 : 0   # its colour's numbers
+            end
+            k += 1
+        end
+        rest = SubString(rest, ncodeunits(m.match) + 1)
+    end
+    attrs
+end
+
+const SGR_ON = Dict{Int,Symbol}(1 => :intensity, 2 => :intensity, 3 => :italic,
+    4 => :underline, 21 => :underline, 5 => :blink, 6 => :blink, 7 => :inverse,
+    8 => :hidden, 9 => :strike, 38 => :fg, 48 => :bg, 51 => :frame, 52 => :frame,
+    53 => :overline, 58 => :ulcolor,
+    (n => :fg for n in [30:37; 90:97])..., (n => :bg for n in [40:47; 100:107])...)
+const SGR_OFF = Dict{Int,Symbol}(0 => :all, 22 => :intensity, 23 => :italic,
+    24 => :underline, 25 => :blink, 27 => :inverse, 28 => :hidden, 29 => :strike,
+    39 => :fg, 49 => :bg, 54 => :frame, 55 => :overline, 59 => :ulcolor)
+
+"""Whether writing `off` ends `s` as well as what it was written for: when it
+is `s`'s own close, a reset, or turns off an attribute `s` turned on."""
+function ends(off::AbstractString, s::MDStyle)
+    isempty(off) && return false
+    off == s[2] && return true
+    offs, ons = sgrattrs(off; off = true), sgrattrs(s[1])
+    (offs === nothing || ons === nothing) && return false
+    :all in offs || any(in(offs), ons)
+end
+
 """A row of runs as the string that prints it.
 
 A style two neighbours share stays open across both: only the styles that
 differ are closed and opened, so a code span is one background with its
-backticks dimmed inside it, not three. An end that is also the end of a style
-still open - `\e[22m` ends bold and dim alike - would take that one with it,
-so it is opened again after. Nothing is open at the end of the row."""
+backticks dimmed inside it, not three. A close that ends a style still open as
+well - `\e[22m` ends bold and dim alike, and `\e[0m` ends everything - would
+take that one with it, so it is opened again after. Nothing is open at the end
+of the row."""
 function emit(line::Line)
     io = IOBuffer()
     open = MDStyle[]
@@ -192,7 +238,7 @@ function emit(line::Line)
             write(io, c[2])
         end
         for s in open[1:k]
-            any(c -> c[2] == s[2] && !isempty(s[2]), closing) && write(io, s[1])
+            any(c -> ends(c[2], s), closing) && write(io, s[1])
         end
         for s in r.styles[k+1:end]
             write(io, s[1])
@@ -224,12 +270,14 @@ function wraprun(line::Line, w::Int; hard::Bool = false)
     i = 1
     while i <= n
         if col + gw[i] > w && i > rs
+            !hard && gs[i] == " " && (bp = i)   # a word that ends at the edge
             if !hard && bp > rs
                 push!(spans, rs:bp-1)
                 rs = bp + 1
-                while rs < i && gs[rs] == " "    # the spaces the break left
+                while rs <= n && gs[rs] == " "   # the spaces the break left
                     rs += 1
                 end
+                i = max(i, rs)
                 col = sum(@view(gw[rs:i-1]); init = 0)
             else
                 push!(spans, rs:i-1)

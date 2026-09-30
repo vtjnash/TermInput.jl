@@ -1376,6 +1376,16 @@ end
         rs = drawn("**a `b` c**"; style = MarkdownStyle(bold = B, code_tick = D))
         @test occursin("\e[1ma \e[2m`\e[22m\e[1mb\e[2m`\e[22m\e[1m c\e[22m", rs[1].text)
         @test rs[1].src == "a `b` c"
+        # So does a reset, which ends everything: what is still open is opened
+        # again after it, a link's underline and a code span's background.
+        R = ("\e[1m", "\e[0m")
+        rs = drawn("[x **b** y](u)"; style = MarkdownStyle(link = U, bold = R))
+        @test startswith(rs[1].text, "\e[4mx \e[1mb\e[0m\e[4m y\e[24m")
+        rs = drawn("x `y` z"; style = MarkdownStyle(code = BG, code_tick = ("\e[2m", "\e[0m")))
+        @test occursin("x \e[48;5;236m\e[2m`\e[0m\e[48;5;236my\e[2m`\e[0m\e[49m z", rs[1].text)
+        # A close that ends none of what is open leaves it alone.
+        rs = drawn("[x **b** y](u)"; style = MarkdownStyle(link = BG, bold = B))
+        @test startswith(rs[1].text, "\e[48;5;236mx \e[1mb\e[22m y\e[49m")
         # Julia reads a double backtick as maths, so the span is built by hand.
         rs = markdown_rows(Markdown.MD(Any[Markdown.Paragraph(Any[Markdown.Code("", "a`b")])]), 10)
         @test texts(rs) == ["``a`b``"]
@@ -1472,6 +1482,10 @@ end
     end
 
     @testset "the source map" begin
+        # A word that ends at the edge breaks at the space after it, and the
+        # next row starts at the next word.
+        @test texts(drawn("aaaa bbbb cc", 4)) == ["aaaa", "bbbb", "cc"]
+        @test texts(drawn("aa bb\\\nx", 2)) == ["aa", "bb", "x"]
         # A paragraph wrapped over three rows is one `src`, `first` on the first.
         p = "the quick brown fox jumps over the lazy dog and keeps going"
         rs = drawn(p, 24)
