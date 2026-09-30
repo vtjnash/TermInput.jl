@@ -157,12 +157,12 @@ styling and never text.
 
 ## Highlighting: Julia on 1.12 and later, a stub otherwise
 
-- [ ] **`highlight(lang, code) -> Vector{Tuple{UnitRange{Int},Symbol}}`**,
+- [x] **`highlight(lang, code) -> Vector{Tuple{UnitRange{Int},Symbol}}`**,
       public: byte ranges of `code` and the face each is in. The method in
       TermInput is the stub - no ranges, so the block is drawn in
       `codeblock` alone - for every language, and for Julia on a Julia older
       than 1.12.
-- [ ] **`TermInputHighlightExt`**, a package extension on
+- [x] **`TermInputHighlightExt`**, a package extension on
       `JuliaSyntaxHighlighting` (a stdlib since 1.12, and a dependency of
       `Markdown` there, so loading `Markdown` is what triggers it). It adds
       the Julia method: `lang` of `julia`, `jl` or `jldoctest`, or empty,
@@ -176,7 +176,7 @@ styling and never text.
       `Dict` of highlighters that the extension fills in its `__init__`:
       that is a stored function, and "TermIFrame takes no functions from its
       host" is the same rule.
-- [ ] **Faces to styles.** `MarkdownStyle` has a `code` dictionary keyed by
+- [x] **Faces to styles.** `MarkdownStyle` has a `code` dictionary keyed by
       the face name without `julia_`: `keyword`, `funcdef`, `funcall`,
       `macro`, `string`, `string_delim`, `char`, `cmd`, `regex`, `symbol`,
       `number`, `bool`, `comment`, `operator`, `comparator`, `assignment`,
@@ -186,15 +186,20 @@ styling and never text.
       and the other brackets → `parentheses`, `opassignment` → `assignment`
       → `operator`, `typedec` → `type`, `bool` → `number` - and then to
       nothing.
-- [ ] **Say so in the README**: highlighting is Julia's own highlighter where
+- [x] **Say so in the README**: highlighting is Julia's own highlighter where
       the running Julia has one, and a stub everywhere else - other
       languages, and Julia before 1.12. A host that wants more can add a
       method for its own language string; nothing in TermInput needs to
       change for it.
-- [ ] Check that a weak dependency on a stdlib the running Julia lacks
+- [x] Check that a weak dependency on a stdlib the running Julia lacks
       resolves on 1.10 and 1.11 (TermInput's compat is 1.10) and simply never
       loads. If it does not, the stub is all there is before 1.12 either
       way, and the compat moves or the extension moves into the host.
+      *Checked:* on 1.10.12 and 1.11.7 the package resolves with the weak
+      dependency, the extension never loads, and `highlight` is the stub; on
+      1.12.6 and 1.14 it loads with `Markdown`. The face a function's name
+      gets differs by version (`funcall` on 1.12, `funcdef` on 1.14), so the
+      test takes either.
 
 ## Steps
 
@@ -218,7 +223,7 @@ styling and never text.
        map (a paragraph wrapped over three rows is one `src`, `first` on the
        first), every row exactly `w` columns, and wide characters and
        combining marks measured as the terminal draws them.
-4. [ ] **The extension** and its test, run only where `JuliaSyntaxHighlighting`
+4. [x] **The extension** and its test, run only where `JuliaSyntaxHighlighting`
        exists.
 5. [ ] **(worklog)** `render_md` and `show_md` call `markdown_rows`.
        `nodelines` takes `src`/`first` off the rows; `unwrap_map`, `WIDE_MD`,

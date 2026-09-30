@@ -8,8 +8,15 @@ InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 Markdown = "d6f4376e-aef5-505a-96c1-9c027394607a"
 REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
 
+[weakdeps]
+JuliaSyntaxHighlighting = "ac6e5ff7-fb65-4e79-a425-ec3bc9c03011"
+
+[extensions]
+TermInputHighlightExt = "JuliaSyntaxHighlighting"
+
 [compat]
 InteractiveUtils = "1.10"
+JuliaSyntaxHighlighting = "1.12"
 Markdown = "1.10"
 REPL = "1.10"
 julia = "1.10"

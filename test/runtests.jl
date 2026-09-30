@@ -1012,7 +1012,8 @@ end
                                          strike = ("\e[9m", "\e[29m")))
         @test occursin("\e[1mb\e[22m", rs[1].text)
         @test occursin("\e[3mc\e[23m", rs[1].text)
-        @test occursin("\e[9md\e[29m", rs[1].text)
+        # The stdlib parses `~~` and HTML blocks from 1.12 and 1.14.
+        isdefined(Markdown, :Strikethrough) && @test occursin("\e[9md\e[29m", rs[1].text)
         # Nested as written: the inner style inside the outer.
         rs = drawn("**a *b* c**"; style = MarkdownStyle(bold = B, italic = I))
         @test occursin("\e[1m\e[3mb\e[23m\e[22m", rs[1].text)
@@ -1048,7 +1049,8 @@ end
         @test texts(drawn("\$\$x^2\$\$")) == ["\$\$x^2\$\$"]
         @test texts(drawn("a note[^1]\n\n[^1]: said here")) ==
               ["a note[^1]", "", "[^1]: said here"]
-        @test texts(drawn("<div>\nhi\n</div>")) == ["<div>", "hi", "</div>"]
+        isdefined(Markdown, :HTMLBlock) &&
+            @test texts(drawn("<div>\nhi\n</div>")) == ["<div>", "hi", "</div>"]
     end
 
     @testset "code blocks" begin
@@ -1168,6 +1170,39 @@ end
         Markdown.plaininline(io::IO, ::Mystery) = print(io, "inline mystery")
         rs = markdown_rows(Markdown.MD(Any[Mystery(), Markdown.Paragraph(Any["x ", Mystery()])]), 30)
         @test texts(rs) == ["a mystery", "", "x inline mystery"]
+    end
+end
+
+@testset "a code block in Julia is highlighted where Julia has a highlighter" begin
+    import Markdown
+    import TermInput: MarkdownStyle, highlight
+    Y, G = ("\e[33m", "\e[39m"), ("\e[32m", "\e[39m")
+    # A face with no style of its own falls back through the fixed table, and
+    # then to nothing.
+    st = MarkdownStyle(faces = Dict(:string => G, :operator => Y, :parentheses => Y))
+    @test TermInput.facestyle(st, :string_delim) == G
+    @test TermInput.facestyle(st, :rainbow_paren_3) == Y
+    @test TermInput.facestyle(st, :opassignment) == Y
+    @test TermInput.facestyle(st, :keyword) == ("", "")
+    # Every other language is the stub's, everywhere.
+    @test highlight("python", "def f(): pass") == Tuple{UnitRange{Int},Symbol}[]
+    if VERSION >= v"1.12"
+        # `Markdown` loads JuliaSyntaxHighlighting, which loads the extension.
+        @test Base.get_extension(TermInput, :TermInputHighlightExt) !== nothing
+        hl = highlight("julia", "function f(x) end")
+        @test (1:8, :keyword) in hl
+        @test any(r -> r[1] == 10:10 && r[2] in (:funcdef, :funcall), hl)   # by version
+        @test all(f -> !startswith(String(f), "julia_"), last.(hl))
+        @test highlight("", "x = 1") == highlight("jldoctest", "x = 1") != []
+        rs = markdown_rows(Markdown.parse("```julia\nfunction f() end\n```"), 30;
+                           style = MarkdownStyle(faces = Dict(:keyword => Y)))
+        @test occursin("\e[33mfunction\e[39m", rs[1].text)
+        @test astrip(rs[1].text) == rpad("   function f() end", 30)
+        @test rs[1].src == "function f() end"
+    else
+        # Before 1.12 there is no highlighter, and the extension never loads.
+        @test Base.get_extension(TermInput, :TermInputHighlightExt) === nothing
+        @test highlight("julia", "x = 1") == Tuple{UnitRange{Int},Symbol}[]
     end
 end
 

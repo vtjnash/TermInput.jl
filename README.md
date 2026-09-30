@@ -193,8 +193,19 @@ rs[i].first    # whether this row starts that line
 
 A code block is highlighted where its language has a highlighter:
 `highlight(lang, code)` answers byte ranges and the face each is in, and
-`style.faces` says how each face is drawn. The method here is a stub for every
-language; a host that wants one adds a method for its own `lang`.
+`style.faces` says how each face is drawn, keyed by the face's name -
+`keyword`, `string`, `comment`, `number`, `type`, `macro`, `funcall` and the
+rest. A face with no entry falls back through a fixed table (`string_delim` to
+`string`, every bracket to `parentheses`, `opassignment` to `assignment` to
+`operator`, `typedec` to `type`, `bool` to `number`) and then to nothing.
+
+The highlighter is Julia's own, where the running Julia has one: from 1.12,
+`Markdown` loads `JuliaSyntaxHighlighting`, and an extension on it answers for
+a block marked `julia`, `jl`, `jldoctest` or nothing at all. Everywhere else -
+every other language, and Julia before 1.12 - it is a stub with no ranges, and
+the block is drawn in `codeblock` alone. A host that wants another language
+adds a method for its own `lang` string, specialised on `code::String` as the
+extension's is; nothing here needs to change for it.
 
 ## The box, and the measuring
 
