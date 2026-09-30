@@ -256,9 +256,10 @@ on the screen, and the rows have to fit that screen the way a text area does.
 ```julia
 using TermInput, Markdown
 import TermInput: MarkdownStyle
+import StyledStrings: Face
 
 md = Markdown.parse(body)                      # the host parses
-rs = markdown_rows(md, 80; style = MarkdownStyle(bold = ("\e[1m", "\e[22m")),
+rs = markdown_rows(md, 80; style = MarkdownStyle(bold = Face(weight = :bold)),
                    breaks = true)
 rs[i].text     # the row: exactly 80 columns, escapes inline
 rs[i].src      # the written line it came from, unstyled - what a copy yields
@@ -271,12 +272,20 @@ rs[i].first    # whether this row starts that line
 * **Every row knows its line.** A paragraph wrapped over three rows is one
   `src`, with `first` on the first, so copying rows back out gives the lines as
   they were written, not as they were wrapped.
-* **Styles are pairs, passed in.** `MarkdownStyle` is one `(on, off)` pair per
-  thing that is styled - headings by level, emphasis, code spans and blocks,
-  links, quotes, admonitions by category, tables, rules - all empty by default,
-  which draws with no escapes at all. Each piece of a row is closed behind
-  itself, so a code span that wraps is closed at the end of one row and opened
-  on the next, and the padding is never painted.
+* **Styles are faces, passed in.** `MarkdownStyle` is one StyledStrings `Face`
+  per thing that is styled - headings by level, emphasis, code spans and
+  blocks, links, quotes, admonitions by category, tables, rules - all empty by
+  default, which draws with no escapes at all. A style inside another is merged
+  over it, and StyledStrings writes each row, so only what changes between two
+  pieces is written, a colour given as RGB is drawn as RGB where the terminal
+  has it and as its nearest of the 256 where it does not, and italic and
+  strikethrough are what the terminal's terminfo says. Everything is closed at
+  the end of a row, so a code span that wraps is closed at the end of one row
+  and opened on the next, and the padding is never painted. The faces are used
+  as given, never looked up by name in StyledStrings' own table; a face's
+  `inherit` would be, so a host leaves it empty. On 1.10,
+  StyledStrings is the registered package; from 1.11 it is the stdlib. Before
+  1.12 it writes one weight over another, so dim inside bold is drawn as both.
 * **`breaks = true`** makes a newline inside a paragraph a line break, as
   GitHub draws a comment, rather than a space, as a document is read. Julia's
   `Markdown` keeps the newline from 1.14; before that there is none to act on.

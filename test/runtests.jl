@@ -18,6 +18,7 @@ import TermInput: ESCAPE, settext!, curline, move!, newline!, insertblock!, past
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
     DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal
 import InteractiveUtils
+import StyledStrings: Face, SimpleColor
 
 @testset "TermInput" begin
 
@@ -1346,10 +1347,12 @@ end
         rs
     end
     texts(rs) = [rstrip(astrip(r.text)) for r in rs]
-    B = ("\e[1m", "\e[22m")
-    BG = ("\e[48;5;236m", "\e[49m")
-    I, D, U, Y = ("\e[3m", "\e[23m"), ("\e[2m", "\e[22m"), ("\e[4m", "\e[24m"),
-                 ("\e[33m", "\e[39m")
+    B, BG = Face(weight = :bold), Face(background = SimpleColor(:blue))
+    I, D, U = Face(slant = :italic), Face(weight = :light), Face(underline = true)
+    Y = Face(foreground = SimpleColor(:yellow))
+    # What a face writes round a word, as StyledStrings has it for this
+    # terminal: italic and strikethrough are what its terminfo says they are.
+    around(f::Face, s) = TermInput.emit([TermInput.Run(s, [f])])
 
     @testset "one per element" begin
         @test texts(drawn("just words")) == ["just words"]
@@ -1358,34 +1361,33 @@ end
         rs = drawn("## Two"; style = MarkdownStyle(h2 = B))
         @test startswith(rs[1].text, "\e[1mTwo\e[22m")
         rs = drawn("a **b** *c* ~~d~~";
-                   style = MarkdownStyle(bold = B, italic = ("\e[3m", "\e[23m"),
-                                         strike = ("\e[9m", "\e[29m")))
+                   style = MarkdownStyle(bold = B, italic = I,
+                                         strike = Face(strikethrough = true)))
         @test occursin("\e[1mb\e[22m", rs[1].text)
-        @test occursin("\e[3mc\e[23m", rs[1].text)
+        @test occursin(around(I, "c"), rs[1].text)
         # The stdlib parses `~~` and HTML blocks from 1.12 and 1.14.
-        isdefined(Markdown, :Strikethrough) && @test occursin("\e[9md\e[29m", rs[1].text)
+        isdefined(Markdown, :Strikethrough) &&
+            @test occursin(around(Face(strikethrough = true), "d"), rs[1].text)
         # Nested as written: the inner style inside the outer.
-        rs = drawn("**a *b* c**"; style = MarkdownStyle(bold = B, italic = I))
-        @test startswith(rs[1].text, "\e[1ma \e[3mb\e[23m c\e[22m ")
+        rs = drawn("**a *b* c**"; style = MarkdownStyle(bold = B, italic = U))
+        @test startswith(rs[1].text, "\e[1ma \e[4mb\e[24m c\e[22m ")
         # A code span keeps its backticks, in `code_tick` inside `code`.
         rs = drawn("x `y` z"; style = MarkdownStyle(code = BG, code_tick = D))
         # One background, the backticks dimmed inside it.
-        @test occursin("x \e[48;5;236m\e[2m`\e[22my\e[2m`\e[22m\e[49m z", rs[1].text)
-        # An end that ends an outer style too - `22` is bold's and dim's -
-        # opens the outer one again.
+        @test occursin("x \e[44m\e[2m`\e[22my\e[2m`\e[49m\e[22m z", rs[1].text)
+        # A weight inside a weight replaces it, and the outer one comes back
+        # after - `22` ends bold and dim alike. Before 1.12, StyledStrings
+        # writes one weight over the other, which a terminal draws as both.
         rs = drawn("**a `b` c**"; style = MarkdownStyle(bold = B, code_tick = D))
-        @test occursin("\e[1ma \e[2m`\e[22m\e[1mb\e[2m`\e[22m\e[1m c\e[22m", rs[1].text)
+        @test occursin("\e[1ma \e[22m\e[2m`\e[22m\e[1mb\e[22m\e[2m`\e[22m\e[1m c\e[22m",
+                       rs[1].text) broken = VERSION < v"1.12"
         @test rs[1].src == "a `b` c"
-        # So does a reset, which ends everything: what is still open is opened
-        # again after it, a link's underline and a code span's background.
-        R = ("\e[1m", "\e[0m")
-        rs = drawn("[x **b** y](u)"; style = MarkdownStyle(link = U, bold = R))
-        @test startswith(rs[1].text, "\e[4mx \e[1mb\e[0m\e[4m y\e[24m")
-        rs = drawn("x `y` z"; style = MarkdownStyle(code = BG, code_tick = ("\e[2m", "\e[0m")))
-        @test occursin("x \e[48;5;236m\e[2m`\e[0m\e[48;5;236my\e[2m`\e[0m\e[49m z", rs[1].text)
+        # A style inside a link is merged over it, and the link goes on after.
+        rs = drawn("[x **b** y](u)"; style = MarkdownStyle(link = U, bold = B))
+        @test startswith(rs[1].text, "\e[4mx \e[1mb\e[22m y\e[24m")
         # A close that ends none of what is open leaves it alone.
         rs = drawn("[x **b** y](u)"; style = MarkdownStyle(link = BG, bold = B))
-        @test startswith(rs[1].text, "\e[48;5;236mx \e[1mb\e[22m y\e[49m")
+        @test startswith(rs[1].text, "\e[44mx \e[1mb\e[22m y\e[49m")
         # Julia reads a double backtick as maths, so the span is built by hand.
         rs = markdown_rows(Markdown.MD(Any[Markdown.Paragraph(Any[Markdown.Code("", "a`b")])]), 10)
         @test texts(rs) == ["``a`b``"]
@@ -1420,8 +1422,8 @@ end
 
     @testset "code blocks" begin
         rs = drawn("```\nx = 1\n\ty\n```"; style = MarkdownStyle(codeblock = BG))
-        @test [r.text for r in rs] == ["  \e[48;5;236m x = 1" * " "^32 * "\e[49m",
-                            "  \e[48;5;236m         y" * " "^28 * "\e[49m"]
+        @test [r.text for r in rs] == ["  \e[44m x = 1" * " "^32 * "\e[49m",
+                            "  \e[44m         y" * " "^28 * "\e[49m"]
         # Padded to the width, background and all, so the block reads as one.
         @test endswith(rs[1].text, "\e[49m")
         # The source keeps the tab; the row draws it as its columns.
@@ -1472,11 +1474,11 @@ end
         rs = drawn("xxxxxx `aaa bbb ccc` yy", 12; style = MarkdownStyle(code = BG))
         @test length(rs) == 2
         for r in rs
-            @test count("\e[48;5;236m", r.text) == count("\e[49m", r.text)
-            @test !endswith(rstrip(r.text), "\e[48;5;236m")
+            @test count("\e[44m", r.text) == count("\e[49m", r.text)
+            @test !endswith(rstrip(r.text), "\e[44m")
         end
-        @test occursin("\e[48;5;236m`aaa\e[49m", rs[1].text)
-        @test startswith(rs[2].text, "\e[48;5;236mbbb ccc`\e[49m")
+        @test occursin("\e[44m`aaa\e[49m", rs[1].text)
+        @test startswith(rs[2].text, "\e[44mbbb ccc`\e[49m")
         # The padding is never painted.
         @test all(r -> !occursin(r"\e\[48;5;236m\s*$", r.text), rs)
     end
@@ -1545,14 +1547,14 @@ end
 @testset "a code block in Julia is highlighted where Julia has a highlighter" begin
     import Markdown
     import TermInput: MarkdownStyle, highlight
-    Y, G = ("\e[33m", "\e[39m"), ("\e[32m", "\e[39m")
+    Y, G = Face(foreground = SimpleColor(:yellow)), Face(foreground = SimpleColor(:green))
     # A face with no style of its own falls back through the fixed table, and
     # then to nothing.
     st = MarkdownStyle(faces = Dict(:string => G, :operator => Y, :parentheses => Y))
     @test TermInput.facestyle(st, :string_delim) == G
     @test TermInput.facestyle(st, :rainbow_paren_3) == Y
     @test TermInput.facestyle(st, :opassignment) == Y
-    @test TermInput.facestyle(st, :keyword) == ("", "")
+    @test TermInput.facestyle(st, :keyword) == Face()
     # Every other language is the stub's, everywhere.
     @test highlight("python", "def f(): pass") == Tuple{UnitRange{Int},Symbol}[]
     # A fence's language is a type, and the Julia ones are one type.

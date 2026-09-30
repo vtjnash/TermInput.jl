@@ -8,12 +8,12 @@
 # a host that copies rows back out gets the lines as they were written without
 # rendering a second time to find them.
 #
-# A style is a pair of escapes, the one that starts it and the one that ends
-# it, and every piece of a row is written with its own: the styles it is in,
-# its text, and their ends in reverse. So nothing is in force at the end of a
-# row, the padding is never painted, and a span that wraps is closed on one row
-# and opened again on the next with no state carried between them. A style
-# given as two empty strings writes nothing at all.
+# A style is a StyledStrings `Face`, and a piece of a row is drawn in its styles
+# merged, outermost first. A row is handed to StyledStrings to write, which
+# knows what each face turns on and so writes only what changes from one piece
+# to the next, and closes everything at the end of the row: the padding is
+# never painted, and a span that wraps is closed on one row and opened again on
+# the next with no state carried between them. An empty face writes nothing.
 #
 # Not `awrap`, which wraps a string with escapes already in it: it carries the
 # codes in force across a break but does not close them at the end of the row,
@@ -22,17 +22,31 @@
 # columns, with graphemes kept whole.
 
 import Markdown
+import StyledStrings
+import StyledStrings: Face
 
-"A style: the escape that starts it and the one that ends it."
-const MDStyle = Tuple{String,String}
-const NOSTYLE = ("", "")
+"No style: the face that writes nothing."
+const NOSTYLE = Face()
+
+# The stdlib's from 1.11, and the package's on 1.10, where an annotation is
+# still a pair rather than a named tuple.
+@static if isdefined(Base, :AnnotatedString)
+    const AnnotatedString = Base.AnnotatedString
+    faced(r::UnitRange{Int}, f::Face) = (region = r, label = :face, value = f)
+    const Faced = typeof(faced(1:0, NOSTYLE))
+else
+    const AnnotatedString = StyledStrings.AnnotatedString
+    faced(r::UnitRange{Int}, f::Face) = (r, :face => f)
+    const Faced = Tuple{UnitRange{Int},Pair{Symbol,Any}}
+end
 
 """
     MarkdownStyle(; h1, …, faces)
 
-The escapes markdown is drawn in, one pair `(on, off)` per thing that is styled,
-and every one empty by default - so `MarkdownStyle()` draws with no escapes at
-all.
+The faces markdown is drawn in, a StyledStrings `Face` per thing that is
+styled, and every one empty by default - so `MarkdownStyle()` draws with no
+escapes at all. A style inside another is merged over it, so a bold word in a
+link is the link's underline and bold both.
 
   * `h1` … `h6`          a heading, by level: nothing else carries the level
   * `bold`, `italic`, `strike`
@@ -52,36 +66,38 @@ all.
   * `faces`              a highlighter's faces, by name - see [`highlight`](@ref)
 
 Passed to each render rather than held globally, so a render depends on nothing
-but its arguments: a host with a theme builds one when the theme changes.
+but its arguments: a host with a theme builds one when the theme changes. The
+faces are used as they are, never looked up by name in StyledStrings' own
+table; a face's `inherit` would be, so a host leaves it empty.
 """
 Base.@kwdef struct MarkdownStyle
-    h1::MDStyle = NOSTYLE
-    h2::MDStyle = NOSTYLE
-    h3::MDStyle = NOSTYLE
-    h4::MDStyle = NOSTYLE
-    h5::MDStyle = NOSTYLE
-    h6::MDStyle = NOSTYLE
-    bold::MDStyle = NOSTYLE
-    italic::MDStyle = NOSTYLE
-    strike::MDStyle = NOSTYLE
-    code::MDStyle = NOSTYLE
-    code_tick::MDStyle = NOSTYLE
-    codeblock::MDStyle = NOSTYLE
-    link::MDStyle = NOSTYLE
-    blockquote::MDStyle = NOSTYLE
-    note::MDStyle = NOSTYLE
-    tip::MDStyle = NOSTYLE
-    warning::MDStyle = NOSTYLE
-    danger::MDStyle = NOSTYLE
-    info::MDStyle = NOSTYLE
-    table_head::MDStyle = NOSTYLE
-    table_rule::MDStyle = NOSTYLE
-    rule::MDStyle = NOSTYLE
-    latex::MDStyle = NOSTYLE
-    footnote::MDStyle = NOSTYLE
-    html::MDStyle = NOSTYLE
+    h1::Face = NOSTYLE
+    h2::Face = NOSTYLE
+    h3::Face = NOSTYLE
+    h4::Face = NOSTYLE
+    h5::Face = NOSTYLE
+    h6::Face = NOSTYLE
+    bold::Face = NOSTYLE
+    italic::Face = NOSTYLE
+    strike::Face = NOSTYLE
+    code::Face = NOSTYLE
+    code_tick::Face = NOSTYLE
+    codeblock::Face = NOSTYLE
+    link::Face = NOSTYLE
+    blockquote::Face = NOSTYLE
+    note::Face = NOSTYLE
+    tip::Face = NOSTYLE
+    warning::Face = NOSTYLE
+    danger::Face = NOSTYLE
+    info::Face = NOSTYLE
+    table_head::Face = NOSTYLE
+    table_rule::Face = NOSTYLE
+    rule::Face = NOSTYLE
+    latex::Face = NOSTYLE
+    footnote::Face = NOSTYLE
+    html::Face = NOSTYLE
     box::Box = BOXES.ROUNDED
-    faces::Dict{Symbol,MDStyle} = Dict{Symbol,MDStyle}()
+    faces::Dict{Symbol,Face} = Dict{Symbol,Face}()
 end
 
 """
@@ -167,89 +183,29 @@ end
 "A piece of text and the styles it is in, outermost first."
 struct Run
     text::String
-    styles::Vector{MDStyle}
+    styles::Vector{Face}
 end
 
 const Line = Vector{Run}
 
-"""What an escape turns on, or with `off`, what it turns off: the attributes
-of its SGR parameters, `:all` for a reset. `nothing` for an escape that is not
-SGR alone - a hyperlink, say - which only its own close is known to end."""
-function sgrattrs(e::AbstractString; off::Bool = false)
-    attrs = Symbol[]
-    rest = e
-    while !isempty(rest)
-        m = match(r"^\e\[([0-9;:]*)m", rest)
-        m === nothing && return nothing
-        ps = split(m.captures[1], ';')
-        k = 1
-        while k <= length(ps)
-            p = ps[k]
-            n = isempty(p) ? 0 : something(tryparse(Int, first(split(p, ':'))), -1)
-            a = off ? get(SGR_OFF, n, nothing) : get(SGR_ON, n, nothing)
-            a === nothing || push!(attrs, a)
-            if n in (38, 48, 58) && !occursin(':', p) && k < length(ps)
-                k += ps[k+1] == "5" ? 2 : ps[k+1] == "2" ? 4 : 0   # its colour's numbers
-            end
-            k += 1
-        end
-        rest = SubString(rest, ncodeunits(m.match) + 1)
-    end
-    attrs
-end
-
-const SGR_ON = Dict{Int,Symbol}(1 => :intensity, 2 => :intensity, 3 => :italic,
-    4 => :underline, 21 => :underline, 5 => :blink, 6 => :blink, 7 => :inverse,
-    8 => :hidden, 9 => :strike, 38 => :fg, 48 => :bg, 51 => :frame, 52 => :frame,
-    53 => :overline, 58 => :ulcolor,
-    (n => :fg for n in [30:37; 90:97])..., (n => :bg for n in [40:47; 100:107])...)
-const SGR_OFF = Dict{Int,Symbol}(0 => :all, 22 => :intensity, 23 => :italic,
-    24 => :underline, 25 => :blink, 27 => :inverse, 28 => :hidden, 29 => :strike,
-    39 => :fg, 49 => :bg, 54 => :frame, 55 => :overline, 59 => :ulcolor)
-
-"""Whether writing `off` ends `s` as well as what it was written for: when it
-is `s`'s own close, a reset, or turns off an attribute `s` turned on."""
-function ends(off::AbstractString, s::MDStyle)
-    isempty(off) && return false
-    off == s[2] && return true
-    offs, ons = sgrattrs(off; off = true), sgrattrs(s[1])
-    (offs === nothing || ons === nothing) && return false
-    :all in offs || any(in(offs), ons)
-end
-
-"""A row of runs as the string that prints it.
-
-A style two neighbours share stays open across both: only the styles that
-differ are closed and opened, so a code span is one background with its
-backticks dimmed inside it, not three. A close that ends a style still open as
-well - `\e[22m` ends bold and dim alike, and `\e[0m` ends everything - would
-take that one with it, so it is opened again after. Nothing is open at the end
-of the row."""
+"""A row of runs as the string that prints it: each run in its styles merged,
+written by StyledStrings, which writes only what differs between neighbours -
+so a code span is one background with its backticks dimmed inside it, not
+three - and turns off whatever a close took with it that is still wanted.
+Nothing is open at the end of the row."""
 function emit(line::Line)
+    anns = Faced[]
     io = IOBuffer()
-    open = MDStyle[]
     for r in line
         isempty(r.text) && continue
-        k = 0                                   # how much of `open` is shared
-        while k < min(length(open), length(r.styles)) && open[k+1] == r.styles[k+1]
-            k += 1
-        end
-        closing = open[k+1:end]
-        for c in Iterators.reverse(closing)
-            write(io, c[2])
-        end
-        for s in open[1:k]
-            any(c -> ends(c[2], s), closing) && write(io, s[1])
-        end
-        for s in r.styles[k+1:end]
-            write(io, s[1])
-        end
+        i = position(io)
         write(io, r.text)
-        open = r.styles
+        isempty(r.styles) ||
+            push!(anns, faced(i+1:position(io), foldl(merge, r.styles)))
     end
-    for c in Iterators.reverse(open)
-        write(io, c[2])
-    end
+    text = String(take!(io))
+    isempty(anns) && return text
+    print(IOContext(io, :color => true), AnnotatedString(text, anns))
     String(take!(io))
 end
 
@@ -317,10 +273,10 @@ struct Ctx
     breaks::Bool
 end
 
-with(stack::Vector{MDStyle}, s::MDStyle) = s == NOSTYLE ? stack : vcat(stack, [s])
+with(stack::Vector{Face}, s::Face) = s == NOSTYLE ? stack : vcat(stack, [s])
 
 "Inline content as lines of runs: more than one where it has a line break."
-function inlines(xs, ctx::Ctx, stack::Vector{MDStyle} = MDStyle[])
+function inlines(xs, ctx::Ctx, stack::Vector{Face} = Face[])
     lines = Line[Run[]]
     inline!(lines, xs, ctx, stack)
     lines
@@ -443,7 +399,7 @@ function prefixed!(out::Vector{MDRow}, rows::Vector{MDRow}, first::String, rest:
     out
 end
 
-styled(s::AbstractString, st::MDStyle) = string(st[1], s, st[2])
+styled(s::AbstractString, st::Face) = emit(Run[Run(s, with(Face[], st))])
 
 block!(out::Vector{MDRow}, md::Markdown.MD, w::Int, ctx::Ctx) = blocks!(out, md.content, w, ctx)
 
@@ -456,7 +412,7 @@ end
 
 function block!(out::Vector{MDRow}, h::Markdown.Header{l}, w::Int, ctx::Ctx) where {l}
     st = (ctx.st.h1, ctx.st.h2, ctx.st.h3, ctx.st.h4, ctx.st.h5, ctx.st.h6)[clamp(l, 1, 6)]
-    for line in inlines(h.text, ctx, with(MDStyle[], st))
+    for line in inlines(h.text, ctx, with(Face[], st))
         wrapped!(out, line, w)
     end
     out
@@ -484,7 +440,7 @@ end
 inside it wherever the highlighter gave one; with `tabs`, a tab drawn as its
 columns. Each line comes with its source."""
 function codelines(code::String, lang::AbstractString, st::MarkdownStyle,
-                   base::Vector{MDStyle}; tabs::Bool = true)
+                   base::Vector{Face}; tabs::Bool = true)
     face = fill(:none, ncodeunits(code))
     for (r, f) in highlight(lang, code)
         for b in r
@@ -526,11 +482,11 @@ reflowed, since where a line of code breaks is part of what it says."""
 function block!(out::Vector{MDRow}, c::Markdown.Code, w::Int, ctx::Ctx)
     cb = ctx.st.codeblock
     inner = max(1, w - 3)
-    lines, srcs = codelines(c.code, c.language, ctx.st, with(MDStyle[], cb))
+    lines, srcs = codelines(c.code, c.language, ctx.st, with(Face[], cb))
     for (line, src) in zip(lines, srcs)
         for (k, row) in enumerate(wraprun(line, inner; hard = true))
             fill = max(0, inner - runwidth(row))
-            base = with(MDStyle[], cb)
+            base = with(Face[], cb)
             text = string("  ", emit(vcat(Run(" ", base), row, Run(" "^fill, base))))
             push!(out, MDRow(apad(text, w), rstrip(src), k == 1))
         end
@@ -584,7 +540,7 @@ function block!(out::Vector{MDRow}, a::Markdown.Admonition, w::Int, ctx::Ctx)
     st = admonitionstyle(ctx.st, a.category)
     bar = styled("│ ", st)
     title = isempty(a.title) ? uppercasefirst(a.category) : a.title
-    rows = wrapped!(MDRow[], Run[Run(title, with(MDStyle[], st))], max(1, w - 2))
+    rows = wrapped!(MDRow[], Run[Run(title, with(Face[], st))], max(1, w - 2))
     body = blocks!(MDRow[], a.content, max(1, w - 2), ctx)
     isempty(body) || append!(rows, body)
     prefixed!(out, rows, bar, bar)
@@ -593,11 +549,11 @@ end
 """A footnote's definition, as a paragraph led by its reference. Its reference
 in the text is an inline one, drawn as `[^id]` where it was written."""
 function block!(out::Vector{MDRow}, f::Markdown.Footnote, w::Int, ctx::Ctx)
-    lead = Run(string("[^", f.id, "]:"), with(MDStyle[], ctx.st.footnote))
+    lead = Run(string("[^", f.id, "]:"), with(Face[], ctx.st.footnote))
     content = f.text === nothing ? Any[] : f.text
     if !isempty(content) && first(content) isa Markdown.Paragraph
         lines = inlines(first(content).content, ctx)
-        pushfirst!(lines[1], lead, Run(" ", MDStyle[]))
+        pushfirst!(lines[1], lead, Run(" ", Face[]))
         for line in lines
             wrapped!(out, line, w)
         end
@@ -613,7 +569,7 @@ end
 "Display maths, as its source: there is no drawing it in a terminal."
 function block!(out::Vector{MDRow}, x::Markdown.LaTeX, w::Int, ctx::Ctx)
     for l in split(string("\$\$", x.formula, "\$\$"), '\n')
-        wrapped!(out, Run[Run(String(l), with(MDStyle[], ctx.st.latex))], w; hard = true)
+        wrapped!(out, Run[Run(String(l), with(Face[], ctx.st.latex))], w; hard = true)
     end
     out
 end
@@ -623,7 +579,7 @@ end
     cannot do better than show it."
     function block!(out::Vector{MDRow}, x::Markdown.HTMLBlock, w::Int, ctx::Ctx)
         for l in x.content
-            wrapped!(out, Run[Run(String(l), with(MDStyle[], ctx.st.html))], w; hard = true)
+            wrapped!(out, Run[Run(String(l), with(Face[], ctx.st.html))], w; hard = true)
         end
         out
     end
@@ -638,7 +594,7 @@ function block!(out::Vector{MDRow}, x, w::Int, ctx::Ctx)
         string(x)
     end
     for l in split(rstrip(s, '\n'), '\n')
-        wrapped!(out, Run[Run(String(l), MDStyle[])], w; hard = true)
+        wrapped!(out, Run[Run(String(l), Face[])], w; hard = true)
     end
     out
 end
@@ -686,10 +642,10 @@ function block!(out::Vector{MDRow}, t::Markdown.Table, w::Int, ctx::Ctx)
     # break written inside one is a space here.
     cell(x, head) = begin
         ls = inlines(x isa AbstractVector ? x : Any[x], Ctx(st, false),
-                     head ? with(MDStyle[], st.table_head) : MDStyle[])
+                     head ? with(Face[], st.table_head) : Face[])
         line = Run[]
         for (k, l) in enumerate(ls)
-            k > 1 && push!(line, Run(" ", MDStyle[]))
+            k > 1 && push!(line, Run(" ", Face[]))
             append!(line, l)
         end
         line
@@ -741,7 +697,7 @@ markdown would have.
 """
 function highlighted_lines(lang::AbstractString, code::AbstractString,
                            style::MarkdownStyle = MarkdownStyle())
-    lines, _ = codelines(String(code), lang, style, MDStyle[]; tabs = false)
+    lines, _ = codelines(String(code), lang, style, Face[]; tabs = false)
     String[emit(l) for l in lines]
 end
 
