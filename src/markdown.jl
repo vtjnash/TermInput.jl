@@ -409,17 +409,17 @@ function detab!(io::IO, s::AbstractString, col::Int)
     col
 end
 
-"""The lines of a code block as runs: `codeblock` round everything, and a face
-inside it wherever the highlighter gave one."""
-function codelines(code::String, lang::AbstractString, ctx::Ctx)
-    st = ctx.st
+"""The lines of a code block as runs: `base` round everything, and a face
+inside it wherever the highlighter gave one; with `tabs`, a tab drawn as its
+columns. Each line comes with its source."""
+function codelines(code::String, lang::AbstractString, st::MarkdownStyle,
+                   base::Vector{MDStyle}; tabs::Bool = true)
     face = fill(:none, ncodeunits(code))
     for (r, f) in highlight(lang, code)
         for b in r
             checkbounds(Bool, face, b) && (face[b] = f)
         end
     end
-    base = with(MDStyle[], st.codeblock)
     lines, srcs = Line[], String[]
     line, col, i = Run[], 0, firstindex(code)
     lstart = i
@@ -436,9 +436,13 @@ function codelines(code::String, lang::AbstractString, ctx::Ctx)
         while j <= ncodeunits(code) && code[j] != '\n' && face[j] == f
             j = nextind(code, j)
         end
-        io = IOBuffer()
-        col = detab!(io, SubString(code, i, prevind(code, j)), col)
-        push!(line, Run(String(take!(io)), f === :none ? base : with(base, facestyle(st, f))))
+        piece = SubString(code, i, prevind(code, j))
+        if tabs
+            io = IOBuffer()
+            col = detab!(io, piece, col)
+            piece = String(take!(io))
+        end
+        push!(line, Run(String(piece), f === :none ? base : with(base, facestyle(st, f))))
         i = j
     end
     push!(lines, line); push!(srcs, code[lstart:end])
@@ -451,7 +455,7 @@ reflowed, since where a line of code breaks is part of what it says."""
 function block!(out::Vector{MDRow}, c::Markdown.Code, w::Int, ctx::Ctx)
     cb = ctx.st.codeblock
     inner = max(1, w - 3)
-    lines, srcs = codelines(c.code, c.language, ctx)
+    lines, srcs = codelines(c.code, c.language, ctx.st, with(MDStyle[], cb))
     for (line, src) in zip(lines, srcs)
         for (k, row) in enumerate(wraprun(line, inner; hard = true))
             fill = max(0, inner - runwidth(row))
@@ -653,6 +657,21 @@ function block!(out::Vector{MDRow}, t::Markdown.Table, w::Int, ctx::Ctx)
     end
     push!(out, MDRow(apad(edge(box.bottom), w), "", true))
     out
+end
+
+"""
+    highlighted_lines(lang, code, style = MarkdownStyle()) -> Vector{String}
+
+`code` a line to each string, with the escapes of `style.faces` inline where
+[`highlight`](@ref) paints it in `lang` - and nothing else: no background, no
+wrapping, tabs as they were. Each line closes what it opened. For a host that
+draws a block of code its own way, and wants the colours a code block in
+markdown would have.
+"""
+function highlighted_lines(lang::AbstractString, code::AbstractString,
+                           style::MarkdownStyle = MarkdownStyle())
+    lines, _ = codelines(String(code), lang, style, MDStyle[]; tabs = false)
+    String[emit(l) for l in lines]
 end
 
 # --- the entry point --------------------------------------------------------

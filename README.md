@@ -205,7 +205,9 @@ a block marked `julia`, `jl`, `jldoctest` or nothing at all. Everywhere else -
 every other language, and Julia before 1.12 - it is a stub with no ranges, and
 the block is drawn in `codeblock` alone. A host that wants another language
 adds a method for its own `lang` string, specialised on `code::String` as the
-extension's is; nothing here needs to change for it.
+extension's is; nothing here needs to change for it. `highlighted_lines(lang,
+code, style)` is the same colours with nothing else - no background, no wrap -
+for a host that draws a block of code its own way.
 
 ## The box, and the measuring
 
@@ -267,8 +269,8 @@ is likely to have already or one it uses once, where it sets a widget up:
   what a host drawing a field or a list of its own shares with the widgets:
   `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
   `ESCAPE`
-* `MarkdownStyle`, `MDRow` and `highlight`, which a host drawing markdown
-  builds, reads and extends
+* `MarkdownStyle`, `MDRow`, `highlight` and `highlighted_lines`, which a host
+  drawing markdown builds, reads, extends and borrows
 * `ACTIONS`, which is what `handle!` answers
 
 ```julia

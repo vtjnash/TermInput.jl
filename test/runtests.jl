@@ -1204,7 +1204,13 @@ end
         @test occursin("\e[33mfunction\e[39m", rs[1].text)
         @test astrip(rs[1].text) == rpad("   function f() end", 30)
         @test rs[1].src == "function f() end"
+        # The colours alone, for a host drawing code its own way: a line each,
+        # tabs as written, each line closed.
+        ls = TermInput.highlighted_lines("julia", "function f()\n\tend",
+                                         MarkdownStyle(faces = Dict(:keyword => Y)))
+        @test ls == ["\e[33mfunction\e[39m f()", "\t\e[33mend\e[39m"]
     else
+        @test TermInput.highlighted_lines("julia", "a\nb") == ["a", "b"]
         # Before 1.12 there is no highlighter, and the extension never loads.
         @test Base.get_extension(TermInput, :TermInputHighlightExt) === nothing
         @test highlight("julia", "x = 1") == Tuple{UnitRange{Int},Symbol}[]
