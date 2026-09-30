@@ -14,7 +14,7 @@ a string or an option. This is that, for a terminal.
     import TermInput: render, handle!, text
 
     ta = TextArea("Comment", "on src/parse.jl:42")
-    print(render(ta, 80, 24))               # `h` rows of exactly `w` columns
+    write(stdout, frame_bytes(render(ta, 80, 24)))  # `h` rows of `w` columns
     if handle!(ta, key) === :unhandled      # not an edit, so it is yours
         key == 19 && post(submission(ta))   # ...and this is what `^s` means
     end
@@ -135,11 +135,12 @@ include("choice.jl")
 include("markdown.jl")
 
 """
-    render(widget, w, h) -> String
+    render(widget, w, h) -> Vector{Row}
 
-The whole frame: `h` rows of exactly `w` display columns, joined by newlines and
-with no trailing one. Pure - the same widget and the same size give the same
-string - bar that a `Choice` notes where it put its rows, for [`click!`](@ref).
+The whole frame: `h` rows of exactly `w` display columns, each a [`Row`](@ref)
+in the faces of [`CHROME`](@ref), for [`frame_bytes`](@ref) to write. Pure -
+the same widget and the same size give the same rows - bar that a `Choice`
+notes where it put its rows, for [`click!`](@ref).
 
 Public and not exported, because `render` is a name a host is likely to have
 already; `import TermInput: render` where it is not.

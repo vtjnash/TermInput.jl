@@ -47,7 +47,7 @@ Option as a compose key sends no Meta at all and would leave the editor
 unreachable.
 
     ta = TextArea("Comment", "on src/parse.jl:42")
-    print(render(ta, 80, 24))
+    write(stdout, frame_bytes(render(ta, 80, 24)))
     if handle!(ta, key) === :unhandled      # not an edit, so it is yours
         key == 19 && post(submission(ta))   # ...and this is what `^s` means
     end
@@ -60,7 +60,7 @@ cursor is drawn; see the constructor.
 """
 mutable struct TextArea
     title::String
-    note::String
+    note::Row
     buf::TextBuffer
     top::Int                 # first display row shown
     status::String
@@ -154,13 +154,13 @@ function render(v::TextArea, w::Int, h::Int)
     crow > v.top + bh - 1 && (v.top = crow - bh + 1)
     v.top = clamp(v.top, 1, max(1, length(rows) - bh + 1))
 
-    out = [b.head(v.title)]
-    for l in awraplines(v.note, b.iw)
+    out = Row[b.head(v.title)]
+    for l in rowwraplines(v.note, b.iw)
         push!(out, b.row(l, b.chrome.quiet))
     end
     push!(out, b.row(""))
     for i in v.top:(v.top + bh - 1)
-        line = i <= length(rows) ? rows[i] : ""
+        line = i <= length(rows) ? row(rows[i]) : row("")
         # No cursor while the keyboard is somewhere else. A host that draws this
         # beside something else - a composer next to the diff it is about - has
         # two things on screen and one of them has the keys; two cursors would
@@ -188,25 +188,27 @@ an accent in it throws, and a character index into one with a CJK character in
 it draws the block a column to the left of where the terminal will put it.
 """
 function drawcursor(line::AbstractString, ccol::Int)
-    io, acc, i = IOBuffer(), 0, firstindex(line)
-    while i <= lastindex(line) && acc + textwidth(line[i]) <= ccol - 1
-        acc += textwidth(line[i])
-        write(io, line[i])
-        i = nextind(line, i)
+    x = row(line)
+    str = x.string
+    acc, i = 0, firstindex(str)
+    while i <= lastindex(str) && acc + textwidth(str[i]) <= ccol - 1
+        acc += textwidth(str[i])
+        i = nextind(str, i)
     end
-    pre = String(take!(io))
-    at, post = if i <= lastindex(line)
-        # A blank under the block, so a cursor past the end of the line is
-        # still somewhere: `\e[7m\e[0m` paints nothing at all.
-        (string(line[i]), String(SubString(line, nextind(line, i))))
-    else
-        (" ", "")
-    end
-    string(pre, "\e[7m", at, "\e[0m", post)
+    pre = slice(x, 1, i - 1)
+    # A blank under the block, so a cursor past the end of the line is still
+    # somewhere: reverse video over nothing paints nothing at all.
+    i > lastindex(str) && return rowcat(pre, faced(" ", CURSOR))
+    j = nextind(str, i)
+    rowcat(pre, faced(slice(x, i, j - 1), CURSOR), slice(x, j, ncodeunits(str)))
 end
 
+"""The block the cursor is drawn as: reverse video, whatever a host's theme
+says - see [`CHROME`](@ref)."""
+const CURSOR = Face(inverse = true)
+
 """
-    drawfield(line, col, w) -> String
+    drawfield(line, col, w) -> Row
 
 A line in `w` columns with the cursor drawn on it at character column `col`,
 scrolled sideways so the cursor is on screen. What a `LineInput` draws its field

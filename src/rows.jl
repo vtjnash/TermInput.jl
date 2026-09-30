@@ -39,6 +39,9 @@ else
     const rowcat_ = StyledStrings.AnnotatedStrings.annotatedstring
 end
 
+"The last byte of a region, whichever way the region's end is counted."
+lastbyte(str::AbstractString, r::UnitRange{Int}) = nextind(str, last(r)) - 1
+
 """
     Row
 
@@ -127,7 +130,8 @@ verbatim(text::AbstractString, w::Int) =
 function verbatims(s::AnnotatedString)
     out = Tuple{UnitRange{Int},Int}[]
     for a in StyledStrings.annotations(s)
-        annlabel(a) === :verbatim && push!(out, (annregion(a), annvalue(a)::Int))
+        annlabel(a) === :verbatim &&
+            push!(out, (first(annregion(a)):lastbyte(s.string, annregion(a)), annvalue(a)::Int))
     end
     sort!(out; by = first ∘ first)
 end

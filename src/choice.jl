@@ -72,7 +72,7 @@ the default `window` of [`click!`](@ref) and [`doubled`](@ref).
 const DOUBLECLICK = 0.5
 
 "The lines of an option's label: the option, then what is said under it."
-optlines(label::AbstractString) = split(label, '\n')
+optlines(label::AbstractString) = rowlines(label)
 
 """The key that picks row `i` straight off, or `' '` for a row past the tenth.
 
@@ -89,7 +89,7 @@ Pick one of a list, narrowing by typing.
     import TermInput: render, handle!    # `picked` is exported
 
     c = Choice("Labels", "↵ toggles one", ["bug", "docs", "performance"])
-    print(render(c, 80, 24))
+    write(stdout, frame_bytes(render(c, 80, 24)))
     if handle!(c, key) === :unhandled      # not a move or an edit
         i = picked(c, key)                 # ↵, or a digit: which one, or 0
         i > 0 && apply(c.labels[i])
@@ -115,8 +115,8 @@ reading, since it costs those ten the ability to be narrowed by typing a digit.
 """
 mutable struct Choice
     title::String
-    note::String
-    labels::Vector{String}
+    note::Row
+    labels::Vector{Row}
     input::LineInput                      # the query
     sel::Int
     top::Int
@@ -155,7 +155,7 @@ title. `""` for none; it is not optional here only because `labels` follows it.
 """
 function Choice(title, note, labels::AbstractVector; numbered::Bool = false,
                 hint::AbstractString = CHOICE_HINT, maxwidth::Int = DIALOG_WIDTH)
-    Choice(String(title), notetext(note), String[String(l) for l in labels],
+    Choice(String(title), notetext(note), Row[row(l) for l in labels],
            LineInput(""), 1, 1, numbered, "", String(hint), maxwidth,
            1:0, 1:0, Int[], (0.0, 0, 0))
 end
@@ -182,12 +182,12 @@ fold(s::AbstractString) = map(ch -> isvalid(ch) ? lowercase(ch) : ch, s)
     matches(c::Choice) -> Vector{Int}
 
 The options the query leaves showing, as indices into `labels`: those whose
-label, lines under it included, holds the query, ignoring case and escapes.
+label, lines under it included, holds the query, ignoring case and faces.
 """
 function matches(c::Choice)
     q = fold(query(c))
     isempty(q) && return collect(eachindex(c.labels))
-    Int[i for (i, l) in enumerate(c.labels) if occursin(q, fold(astrip(l)))]
+    Int[i for (i, l) in enumerate(c.labels) if occursin(q, fold(String(l)))]
 end
 
 """
@@ -226,20 +226,20 @@ function render(c::Choice, w::Int, h::Int)
     bh = clamp(sum(hs; init = 0), 1, max(1, h - 10))
     c.sel, c.top, win = listwindow(hs, c.sel, c.top, bh)
 
-    out = [b.head(c.title)]
-    notes = isempty(c.note) ? String[] : awraplines(c.note, b.iw)
+    out = Row[b.head(c.title)]
+    notes = isempty(c.note) ? Row[] : rowwraplines(c.note, b.iw)
     for l in notes
         push!(out, b.row(l, ch.quiet))
     end
     line = curline(c.input.buf)
-    push!(out, b.row(string("/ ", drawfield(line, c.input.buf.col, b.iw - 2))))
+    push!(out, b.row(rowcat("/ ", drawfield(line, c.input.buf.col, b.iw - 2))))
     c.omap = Int[]
     for i in win, (j, l) in enumerate(optlines(c.labels[m[i]]))
         length(c.omap) < bh || break
         # The digit, or a space where it has run out, so the names stay in one
         # column whether or not the row has a key of its own; and the lines
         # under an option in that column too.
-        label = !c.numbered ? l : string(j == 1 ? numkey(i) : ' ', "  ", l)
+        label = !c.numbered ? l : rowcat(j == 1 ? numkey(i) : ' ', "  ", l)
         push!(out, b.row(label, i == c.sel ? ch.focus : ch.quiet))
         push!(c.omap, i)
     end
@@ -332,7 +332,7 @@ Ask a question that named keys answer, and nothing else does.
 
     c = Confirm("Discard what you have written?", "it is not saved anywhere";
                 hint = "y discards · any other key keeps it")
-    print(render(c, 80, 24))
+    write(stdout, frame_bytes(render(c, 80, 24)))
     answer(c, key) == 1 && discard()       # 0 is no, whatever the key was
 
 Not a [`Choice`](@ref) of two entries: there the answer is already under the
@@ -348,7 +348,7 @@ as on the other widgets.
 """
 mutable struct Confirm
     title::String
-    note::String
+    note::Row
     hint::String
     keys::Vector{String}
     maxwidth::Int
@@ -387,8 +387,8 @@ Confirm(title, note, keys::AbstractVector = ["yY"];
 
 function render(c::Confirm, w::Int, h::Int)
     b = dialogbox(w; width = c.maxwidth)
-    out = [b.head(c.title)]
-    for l in (isempty(c.note) ? String[] : awraplines(c.note, b.iw))
+    out = Row[b.head(c.title)]
+    for l in (isempty(c.note) ? Row[] : rowwraplines(c.note, b.iw))
         push!(out, b.row(l, b.chrome.quiet))
     end
     push!(out, b.foot())

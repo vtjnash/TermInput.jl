@@ -188,7 +188,7 @@ function emit(line::Line)
     end
     text = String(take!(io))
     isempty(anns) && return text
-    print(IOContext(io, :color => true), AnnotatedString(text, anns))
+    print(IOContext(io, :color => true), Row(text, anns))
     String(take!(io))
 end
 

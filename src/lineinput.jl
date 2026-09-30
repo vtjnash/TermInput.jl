@@ -16,7 +16,7 @@
 Ask for one line of text.
 
     li = LineInput("Snooze until", "a date, or a number of days")
-    print(render(li, 80, 24))
+    write(stdout, frame_bytes(render(li, 80, 24)))
     if handle!(li, key) === :unhandled     # not an edit, so it is yours
         key in (13, 10) && accept(submission(li))
     end
@@ -29,7 +29,7 @@ the host's, the same as everywhere else.
 """
 mutable struct LineInput
     title::String
-    note::String
+    note::Row
     buf::TextBuffer
     status::String
     hint::String
@@ -106,11 +106,11 @@ column(v::LineInput) = v.buf.col
 function render(v::LineInput, w::Int, h::Int)
     b = dialogbox(w; width = v.maxwidth)
     line = curline(v.buf)
-    out = [b.top(), b.row(v.title, b.chrome.strong), b.row("")]
-    for l in awraplines(v.note, b.iw)
+    out = Row[b.top(), b.row(v.title, b.chrome.strong), b.row("")]
+    for l in rowwraplines(v.note, b.iw)
         push!(out, b.row(l, b.chrome.quiet))
     end
-    push!(out, b.row(string("> ", drawfield(line, v.buf.col, b.iw - 2))))
+    push!(out, b.row(rowcat("> ", drawfield(line, v.buf.col, b.iw - 2))))
     push!(out, b.foot())
     push!(out, b.hint(isempty(v.status) ? v.hint : v.status))
     centred(out, w, h)

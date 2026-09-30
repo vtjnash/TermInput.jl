@@ -21,6 +21,12 @@ import TermInput: Row, verbatim, linked, overlaid, rowhead, rowtail, rowlines, r
 import InteractiveUtils
 import StyledStrings: Face, SimpleColor
 
+# What StyledStrings writes for a row, which is what a terminal is sent; and a
+# frame of them, a row to a line.
+ansi(r::AbstractString) = sprint(print, r; context = :color => true)
+screen(rows::AbstractVector) = join(ansi.(rows), "\n")
+const REV = Face(inverse = true)
+
 @testset "TermInput" begin
 
 @testset "display width of text with escapes in it" begin
@@ -670,18 +676,25 @@ end
     # into one with a CJK character in it draws the block a column to the left
     # of where the terminal will put it. `ccol` is a display column, and the
     # block lands on the character occupying it.
-    @test drawcursor("abc", 2) == "a\e[7mb\e[0mc"
-    @test astrip(drawcursor("héllo", 3)) == "héllo"
-    @test astrip(drawcursor("日本語", 3)) == "日本語"
-    @test occursin("\e[7m本", drawcursor("日本語", 3))
+    @test ansi(drawcursor("abc", 2)) == ansi(rowcat("a", faced("b", REV), "c"))
+    @test String(drawcursor("héllo", 3)) == "héllo"
+    @test String(drawcursor("日本語", 3)) == "日本語"
+    # StyledStrings 1.0.3, the package on 1.10, cannot write a face after a
+    # character of more than one byte: it cuts the text before it mid-character.
+    @test ansi(drawcursor("日本語", 3)) == ansi(rowcat("日", faced("本", REV), "語")) broken = VERSION < v"1.11"
     # Past the end of the line there is a blank to stand on, so the cursor is
-    # still somewhere: `\e[7m\e[0m` paints nothing at all.
-    @test drawcursor("ab", 3) == "ab\e[7m \e[0m"
-    @test astrip(drawcursor("", 1)) == " "
+    # still somewhere: reverse video over nothing paints nothing at all.
+    @test ansi(drawcursor("ab", 3)) == ansi(rowcat("ab", faced(" ", REV)))
+    @test String(drawcursor("", 1)) == " "
     # Drawing the cursor adds no columns to a line it is inside of.
     for (s, c) in (("abc", 2), ("héllo", 4), ("日本語", 1), ("", 1))
-        @test awidth(drawcursor(s, c)) == max(awidth(s), c)
+        @test rowwidth(drawcursor(s, c)) == max(textwidth(s), c)
     end
+    # A line with faces keeps them on either side of the block.
+    @test ansi(drawcursor(faced("abc", Face(weight = :bold)), 2)) ==
+          ansi(rowcat(faced("a", Face(weight = :bold)),
+                      faced(faced("b", REV), Face(weight = :bold)),
+                      faced("c", Face(weight = :bold))))
     @test displaycolumn("日本語", 3) == 5      # two wide characters behind it
     @test displaycolumn("abc", 1) == 1
 end
@@ -767,30 +780,30 @@ end
     v = TextArea("a title", "a note that is long enough to want wrapping at some widths")
     for c in "some text\nand a second line"; handle!(v, keycode(c)); end
     for (w, h) in ((80, 24), (120, 40), (60, 12), (40, 9), (200, 60))
-        ls = split(render(v, w, h), "\n")
+        ls = split(screen(render(v, w, h)), "\n")
         @test length(ls) == h
         @test all(awidth(l) == w for l in ls)
     end
     # The box stops widening long before the screen does, because a line of
     # prose 200 columns wide is not one anybody can read.
-    wide = split(render(v, 200, 24), "\n")
+    wide = split(screen(render(v, 200, 24)), "\n")
     @test maximum(awidth(astrip(strip(l))) for l in wide) <= v.maxwidth
 
     # A buffer taller than the box scrolls to keep the cursor on screen, and
     # the frame stays exactly as tall.
     tall = TextArea("t"; initial = join(string.("line ", 1:200), "\n"))
-    ls = split(render(tall, 80, 24), "\n")
+    ls = split(screen(render(tall, 80, 24)), "\n")
     @test length(ls) == 24 && all(awidth(l) == 80 for l in ls)
     @test any(l -> occursin("line 200", l), ls)      # the cursor's line is shown
     @test !any(l -> occursin("line 1 ", l), ls)
     tall.buf.row = 1
-    ls = split(render(tall, 80, 24), "\n")
+    ls = split(screen(render(tall, 80, 24)), "\n")
     @test any(l -> occursin("line 1", l), ls)
 
     # A note of several lines is several rows, and a tab or an escape in the
     # buffer is one column rather than a jump or a command.
     for v in (TextArea("T", "line1\nline2"), TextArea("T"; initial = "a\tb\e[31mc\r\td"))
-        ls = split(render(v, 40, 20), "\n")
+        ls = split(screen(render(v, 40, 20)), "\n")
         @test length(ls) == 20 && all(awidth(l) == 40 for l in ls)
     end
 
@@ -799,7 +812,7 @@ end
     odd = TextArea("t")
     for c in "日本語 é "; handle!(odd, keycode(c)); end
     insert!(odd.buf, keychar(Int(0xF4908080)))
-    ls = split(render(odd, 80, 24), "\n")
+    ls = split(screen(render(odd, 80, 24)), "\n")
     @test all(awidth(l) == 80 for l in ls)
 end
 
@@ -847,23 +860,23 @@ end
     @test text(LineInput("t"; initial = "two\nlines\r\nhere")) == "two lines here"
 
     for (w, h) in ((90, 24), (80, 10), (40, 8), (160, 50))
-        ls = split(render(p, w, h), "\n")
+        ls = split(screen(render(p, w, h)), "\n")
         @test length(ls) == h && all(awidth(l) == w for l in ls)
     end
 
     # A line longer than the box scrolls sideways to keep the cursor on it, and
     # a `…` says what went off the front.
     long = LineInput("t"; initial = join('a':'z') * join('0':'9') * join('A':'J'))
-    cursorline(v, w) = only(filter(l -> occursin("\e[7m", l), split(render(v, w, 10), "\n")))
+    cursorline(v, w) = only(filter(l -> occursin("\e[7m", l), split(screen(render(v, w, 10)), "\n")))
     l = astrip(cursorline(long, 30))
     @test awidth(cursorline(long, 30)) == 30 && occursin("> …", l) && occursin("J  ", l)
     long.buf.col = 1
     @test occursin("> abc", astrip(cursorline(long, 30)))
     long.buf.col = 30
     l = cursorline(long, 30)
-    @test occursin("\e[7m3\e[0m…", l) && occursin("> …", astrip(l))
+    @test occursin(string(ansi(faced("3", REV)), "…"), l) && occursin("> …", astrip(l))
     @test drawfield("abc", 4, 10) == drawcursor("abc", 4)
-    @test astrip(drawfield("abcdefghij", 11, 10)) == "…defghij "
+    @test String(drawfield("abcdefghij", 11, 10)) == "…defghij "
 end
 
 @testset "a choice, narrowed by typing" begin
@@ -896,30 +909,30 @@ end
     @test picked(n, keycode('5')) == 0 && query(n) == ""
     # The default hint names only the keys the widget owns: picking and
     # escape come back, so saying what they do is the host's.
-    @test occursin(CHOICE_HINT, render(n, 80, 24))
+    @test occursin(CHOICE_HINT, screen(render(n, 80, 24)))
     @test !occursin("esc", CHOICE_HINT) && !occursin("↵", CHOICE_HINT)
     # A status is shown instead of the hint, and the next key clears it.
     n.status = "no labels to add"
-    @test occursin("no labels to add", render(n, 80, 24))
+    @test occursin("no labels to add", screen(render(n, 80, 24)))
     handle!(n, K_DOWN)
-    @test isempty(n.status) && occursin(CHOICE_HINT, render(n, 80, 24))
+    @test isempty(n.status) && occursin(CHOICE_HINT, screen(render(n, 80, 24)))
     # A paste is one line of query.
     query!(c, ""); TermInput.paste!(c, "doc\n")
     @test query(c) == "doc" && matches(c) == [2]
 
     # The query scrolls sideways, as a line input does.
     query!(c, "x"^100)
-    @test occursin("/ …xxx", astrip(render(c, 60, 20)))
+    @test occursin("/ …xxx", astrip(screen(render(c, 60, 20))))
     query!(c, "")
 
     # The frame, and where it put the rows, for the mouse.
     many = ["opt $i" * (iseven(i) ? "\n  under $i" : "") for i in 1:12]
     m = Choice("t", "", many; numbered = true)
     for (w, h) in ((90, 24), (80, 12), (160, 50))
-        ls = split(render(m, w, h), "\n")
+        ls = split(screen(render(m, w, h)), "\n")
         @test length(ls) == h && all(awidth(l) == w for l in ls)
     end
-    ls = split(astrip(render(m, 80, 50)), "\n")
+    ls = split(astrip(screen(render(m, 80, 50))), "\n")
     @test m.omap[1:4] == [1, 2, 2, 3]
     r3 = findfirst(l -> occursin("3  opt 3", l), ls)
     @test r3 == first(m.orows) + 3
@@ -934,7 +947,7 @@ end
     # A note of two lines is two rows, and the options - and the mouse - move
     # down one for it.
     t = Choice("t", "line one\nline two", ["a", "b"])
-    ls = split(astrip(render(t, 40, 12)), "\n")
+    ls = split(astrip(screen(render(t, 40, 12))), "\n")
     @test length(ls) == 12 && all(awidth(l) == 40 for l in ls)
     @test ls[first(t.orows) + 1] |> l -> occursin(" b ", l)
     @test click!(t, :press, 10, first(t.orows) + 1, 1.0) === :ok && selected(t) == 2
@@ -944,7 +957,7 @@ end
     bad = Choice("t", "", ["a\x80b", "abc"])
     @test handle!(bad, 0x80 + 0) === :ok && query(bad) == "\x80"
     @test matches(bad) == [1] && selected(bad) == 1 && picked(bad, 13) == 1
-    @test length(split(render(bad, 40, 12), "\n")) == 12
+    @test length(split(screen(render(bad, 40, 12)), "\n")) == 12
     query!(bad, "A")
     @test matches(bad) == [1, 2]
 
@@ -959,7 +972,7 @@ end
     @test :picked in names(TermInput) && :answer in names(TermInput)
     q = Confirm("Discard?", ["", "it is nowhere else"])
     @test q.note == "it is nowhere else"
-    @test occursin(CONFIRM_HINT, render(q, 60, 10))
+    @test occursin(CONFIRM_HINT, screen(render(q, 60, 10)))
     # Every widget takes its note the same way: a string, or rows with the
     # empty ones left out.
     @test Confirm("t", "a\nb").note == Confirm("t", ["a", "", "b"]).note == "a\nb"
@@ -967,16 +980,16 @@ end
           Choice("t", ["a", "b"], ["x"]).note == "a\nb"
     # The hint is a field a host may set afterwards, on every widget.
     q.hint = "y discards it"
-    @test occursin("y discards it", render(q, 60, 10))
+    @test occursin("y discards it", screen(render(q, 60, 10)))
     @test answer(q, keycode('y')) == 1 && answer(q, keycode('Y')) == 1
     @test answer(q, 13) == 0 && answer(q, 27) == 0 && answer(q, keycode('n')) == 0
     q2 = Confirm("Quit", "a draft", ["yY", "\e"]; hint = "y quits · esc goes back")
     @test answer(q2, 27) == 2 && answer(q2, K_UP) == 0
-    ls = split(render(q2, 60, 10), "\n")
+    ls = split(screen(render(q2, 60, 10)), "\n")
     @test length(ls) == 10 && all(awidth(l) == 60 for l in ls)
     @test any(l -> occursin("esc goes back", l), ls)
     q3 = Confirm("Quit", "a draft\nand a stash")
-    ls = split(astrip(render(q3, 60, 10)), "\n")
+    ls = split(astrip(screen(render(q3, 60, 10))), "\n")
     @test length(ls) == 10 && count(l -> occursin("a draft", l) || occursin("and a stash", l), ls) == 2
 end
 
@@ -1017,26 +1030,29 @@ end
     # The glyphs are a table here, and the one drawn is `CHROME[].box` - and a
     # name that is not there is a different corner, not an exception.
     b = dialogbox(80)
-    @test occursin(string(boxstyle().top.left), b.head("title"))
-    @test occursin("title", astrip(b.head("title")))
-    @test awidth(b.row("x")) == b.pad + b.bw
-    @test awidth(b.foot()) == b.pad + b.bw
-    @test awidth(b.head("a title")) == b.pad + b.bw
-    @test awidth(b.top()) == b.pad + b.bw
+    @test occursin(string(boxstyle().top.left), String(b.head("title")))
+    @test occursin("title", String(b.head("title")))
+    @test rowwidth(b.row("x")) == b.pad + b.bw
+    @test rowwidth(b.foot()) == b.pad + b.bw
+    @test rowwidth(b.head("a title")) == b.pad + b.bw
+    @test rowwidth(b.top()) == b.pad + b.bw
     # A title too long for the edge is elided rather than pushing the corner
     # off the end of it.
-    @test awidth(b.head("t"^300)) == b.pad + b.bw
+    @test rowwidth(b.head("t"^300)) == b.pad + b.bw
+    # The title is strong and the edge quiet, each in its own face.
+    @test occursin("\e[1mtitle", ansi(b.head("title")))
+    @test startswith(ansi(b.row("x")), string(" "^b.pad, ansi(faced(string(boxstyle().mid.left), CHROME[].quiet))))
     # The rows a widget draws are painted in the weights its border was, so a
     # box given weights of its own is one box and not two.
-    plain = (strong = "", quiet = "", focus = "", reset = "", box = BOXES.ROUNDED)
+    plain = (strong = Face(), quiet = Face(), focus = Face(), box = BOXES.ROUNDED)
     @test dialogbox(80; chrome = plain).chrome === plain
     old = CHROME[]
     try
         CHROME[] = plain
-        @test !occursin('\e', render(Confirm("t", "a note"), 60, 10))
+        @test !occursin('\e', screen(render(Confirm("t", "a note"), 60, 10)))
         # Bar the cursor, which is reverse video whatever the chrome says.
-        @test !occursin('\e', replace(render(LineInput("t", "a note"), 60, 10),
-                                       "\e[7m \e[0m" => ""))
+        @test !occursin('\e', replace(screen(render(LineInput("t", "a note"), 60, 10)),
+                                       ansi(faced(" ", REV)) => ""))
     finally
         CHROME[] = old
     end
@@ -1044,9 +1060,9 @@ end
     old = CHROME[]
     try
         CHROME[] = merge(old, (box = BOXES.SQUARE,))
-        @test occursin("┌", dialogbox(80).head("t"))
-        @test occursin("└", dialogbox(80).foot())
-        @test occursin("╔", dialogbox(80; box = boxstyle(:DOUBLE)).top())
+        @test occursin("┌", String(dialogbox(80).head("t")))
+        @test occursin("└", String(dialogbox(80).foot()))
+        @test occursin("╔", String(dialogbox(80; box = boxstyle(:DOUBLE)).top()))
     finally
         CHROME[] = old
     end
@@ -1059,10 +1075,10 @@ end
     end
 
     # Every frame is `h` rows of exactly `w` columns, whatever went into it.
-    @test length(split(centred(["a"], 20, 5), "\n")) == 5
-    @test all(awidth(l) == 20 for l in split(centred(["a", "b"], 20, 5), "\n"))
+    @test length(centred(["a"], 20, 5)) == 5
+    @test all(rowwidth(l) == 20 for l in centred(["a", "b"], 20, 5))
     # More rows than there is room for is a frame of the size asked for, still.
-    @test length(split(centred([string(i) for i in 1:50], 20, 5), "\n")) == 5
+    @test length(centred([string(i) for i in 1:50], 20, 5)) == 5
 end
 
 @testset "handing the terminal over and taking it back" begin
@@ -1393,11 +1409,11 @@ end
     # block afterwards, which is the only other way to get there from outside.
     ta = TextArea("Comment", "on a.jl:11"; initial = "a remark")
     @test ta.focused                                    # the only-thing-on-screen case
-    lit = render(ta, 60, 16)
+    lit = screen(render(ta, 60, 16))
     @test occursin("\e[7m", lit)
 
     ta.focused = false
-    dark = render(ta, 60, 16)
+    dark = screen(render(ta, 60, 16))
     @test !occursin("\e[7m", dark)
     # Only the cursor goes. Everything else is the same frame, at the same size,
     # so a host laying two columns against each other gets no shift out of it.
@@ -1410,7 +1426,7 @@ end
     @test handle!(ta, keycode('!')) === :ok
     @test text(ta) == "a remark!"
     ta.focused = true
-    @test occursin("\e[7m", render(ta, 60, 16))
+    @test occursin("\e[7m", screen(render(ta, 60, 16)))
 end
 
 @testset "a misspelt direction is an error, not a key that does nothing" begin

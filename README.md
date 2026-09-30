@@ -14,7 +14,7 @@ using TermInput
 import TermInput: render, handle!, text
 
 ta = TextArea("Comment", "on src/parse.jl:42")
-print(render(ta, 80, 24))               # `h` rows of exactly `w` columns
+write(stdout, frame_bytes(render(ta, 80, 24)))  # `h` rows of `w` columns
 if handle!(ta, key) === :unhandled      # not an edit, so it is yours
     key == 19 && post(submission(ta))   # ...and this is what `^s` means
 end
@@ -162,7 +162,7 @@ own are for. The test suite runs this block, from this file, against an
 ## What it does that a `readline` does not
 
 * **It is a function of state and a size.** `render(v, w, h)` returns `h` rows
-  of exactly `w` display columns and nothing else - no cursor moves, no
+  of exactly `w` display columns, each a `Row` of faces, and nothing else - no cursor moves, no
   clearing, no assumption about where on the screen it is. That is what lets a
   composer be drawn in a column beside something else, and it is why the whole
   of this package can be tested without a tty.
@@ -447,7 +447,7 @@ own to - and a `maxwidth`, `DIALOG_WIDTH` but for the `TextArea`.
 | `ta.focused` | whether a `TextArea` draws its cursor. Only there, because it is the one widget a host draws beside something else; a dialog is always the thing that has the keyboard |
 | `v.hint` | those hints, which name only the keys the widget owns; a host has to add its own |
 | `isblank(v)` | whether there is anything in it - what to ask before deciding what escape costs, or whether an empty one may be sent |
-| `CHROME[]` | the weights it is painted in - `strong`, `quiet`, `focus` (a `Choice`'s cursor) and `reset` - and the `box` it is drawn with, one of `BOXES` |
+| `CHROME[]` | the faces it is painted in - `strong`, `quiet` and `focus` (a `Choice`'s cursor), StyledStrings `Face`s that end only what they begin - and the `box` it is drawn with, one of `BOXES` |
 
 ## Tests
 

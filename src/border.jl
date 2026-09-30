@@ -16,8 +16,8 @@
 # And a buffer full of prose is *not* markup, so the braces in it are
 # somebody's typing rather than a tag - which is the failure the other way
 # round, and the more damaging of the two, because it silently deletes what was
-# typed. So the rows are laid out here against real display widths - see
-# `ansi.jl`.
+# typed. So the rows are laid out here against real display widths, and in
+# faces - see `rows.jl`.
 
 """
     BoxLine(left, mid, vertical, right)
@@ -90,10 +90,10 @@ boxstyle(name::Symbol) = get(BOXES, name, BOXES.ROUNDED)
 boxstyle(name::AbstractString) = boxstyle(Symbol(uppercase(name)))
 
 """
-    CHROME[] = (strong = ..., quiet = ..., focus = ..., reset = ..., box = ...)
+    CHROME[] = (strong = ..., quiet = ..., focus = ..., box = ...)
 
 How the chrome of a widget is drawn, for a host to set: three kinds of
-emphasis, what ends them, and the box.
+emphasis, each a StyledStrings `Face`, and the box.
 
 They are a `Ref` because a host that has its own colours - a dashboard with a
 theme file, say - has one place to say so rather than an argument to thread
@@ -102,19 +102,19 @@ through every widget it draws.
   * `strong` a title, and a border that has the keyboard
   * `quiet`  a border that does not, and the note and hint lines around it
   * `focus`  the option under the cursor in a `Choice`
-  * `reset`  what ends any of them
   * `box`    the [`Box`](@ref) the border is drawn with, one of [`BOXES`](@ref)
 
-The defaults are bold, dim, reverse video, a reset and `ROUNDED`. A host that
-sets the four weights to `""` gets chrome with no escapes in it at all, which is
+The defaults are bold, light (which a terminal draws as dim), reverse video
+and `ROUNDED`. Nothing ends them: a face ends only what it began. A host that
+sets the three to `Face()` gets chrome with no escapes in it at all, which is
 what a program drawing plain text wants and what a pipe wants.
 
 Not in here: the block that marks where the cursor is in a `TextArea`. Reverse
 video there is not emphasis, it is the only thing saying where typing will go,
 and a host that turned its colours off would otherwise lose it.
 """
-const CHROME = Ref((strong = "\e[1m", quiet = "\e[2m", focus = "\e[7m", reset = "\e[0m",
-                    box = BOXES.ROUNDED))
+const CHROME = Ref((strong = Face(weight = :bold), quiet = Face(weight = :light),
+                    focus = Face(inverse = true), box = BOXES.ROUNDED))
 
 """
     DIALOG_WIDTH
@@ -133,13 +133,14 @@ const DIALOG_WIDTH = 76
     dialogbox(w; width = DIALOG_WIDTH, box = boxstyle(), chrome = CHROME[]) -> NamedTuple
 
 The box a widget is drawn in, on a screen `w` columns wide: how wide it is, and
-the five kinds of row in it.
+the five kinds of row in it, each a [`Row`](@ref).
 
   * `head(title)`        the top edge with a title written into it
   * `top()`              the same edge with nothing in it, for a widget whose
                          title is a row of its own
-  * `row(s, style = "")` one line inside the box, in `style`, padded to the full
-                         inner width
+  * `row(s, style = Face())` one line inside the box, in `style`, padded to the
+                         full inner width - so a background in it is the width
+                         of the box
   * `foot()`             the bottom edge
   * `hint(s)`            the dim line *under* the box, which is outside the
                          border because it is about the keys and not about the
@@ -147,7 +148,7 @@ the five kinds of row in it.
 
 `width` is the widest the box may be; it is narrower when the screen is. `box`
 is the box style its characters come from, and `chrome` the weights it is
-painted in.
+painted in. A line handed in keeps the faces it has, under the style.
 
 The fields `bw`, `pad` and `iw` are the box's own width, the left margin that
 centres it, and the columns available inside it. `chrome` is the weights it was
@@ -158,44 +159,56 @@ function dialogbox(w::Int; width::Int = DIALOG_WIDTH, box = boxstyle(), chrome =
     bw = min(w - 4, width)
     pad = (w - bw) ÷ 2
     iw = bw - 4
-    D, R = chrome.quiet, chrome.reset
+    D = chrome.quiet
     tl, tm, tr = box.top.left, box.top.mid, box.top.right
     ml, mr = box.mid.left, box.mid.right
     bl, bm, br = box.bottom.left, box.bottom.mid, box.bottom.right
-    row(s, style = "") = string(" "^pad, D, ml, R, " ", style,
-                                apad(afit(s, iw), iw), R, " ", D, mr, R)
+    row(s, style::Face = NOSTYLE) =
+        rowcat(" "^pad, faced(ml, D), " ", faced(rowpad(rowfit(s, iw), iw), style), " ",
+               faced(mr, D))
     # `tl tm " "` + title + `" "` + bar + `tr` must total `bw`, so the filler is
     # `bw - 5 - |title|`.
-    head(t) = string(" "^pad, D, tl, tm, " ", R, chrome.strong, afit(t, iw - 2), R, D, " ",
-                     string(tm)^max(0, bw - 5 - awidth(afit(String(t), iw - 2))), tr, R)
-    top() = string(" "^pad, D, tl, string(tm)^max(0, bw - 2), tr, R)
-    foot() = string(" "^pad, D, bl, string(bm)^max(0, bw - 2), br, R)
-    hint(s) = string(" "^pad, D, afit(s, bw), R)
+    function head(t)
+        tt = rowfit(t, iw - 2)
+        rowcat(" "^pad, faced(string(tl, tm, " "), D), faced(tt, chrome.strong),
+               faced(string(" ", string(tm)^max(0, bw - 5 - rowwidth(tt)), tr), D))
+    end
+    top() = rowcat(" "^pad, faced(string(tl, string(tm)^max(0, bw - 2), tr), D))
+    foot() = rowcat(" "^pad, faced(string(bl, string(bm)^max(0, bw - 2), br), D))
+    hint(s) = rowcat(" "^pad, faced(rowfit(s, bw), D))
     (bw = bw, pad = pad, iw = iw, chrome = chrome, row = row, head = head,
      top = top, foot = foot, hint = hint)
 end
 
 """
-    centred(out, w, h) -> String
+    centred(out, w, h) -> Vector{Row}
 
 Put a built box in the middle of the screen and pad it out to a whole frame:
 `h` rows of exactly `w` display columns, which is the contract every `render`
 here keeps.
 """
-function centred(out::Vector{String}, w::Int, h::Int)
+function centred(out::AbstractVector, w::Int, h::Int)
     top = max(0, (h - length(out)) ÷ 2)
-    all = vcat([" "^w for _ in 1:top], out)
-    while length(all) < h; push!(all, " "^w); end
-    join([apad(l, w) for l in all[1:h]], "\n")
+    rows = Row[rowpad("", w) for _ in 1:top]
+    for l in out
+        length(rows) < h || break
+        push!(rows, rowpad(l, w))
+    end
+    while length(rows) < h; push!(rows, rowpad("", w)); end
+    rows
 end
 
 """
-    notetext(note) -> String
+    notetext(note) -> Row
 
-What a widget says under its title, as one string with a row to each line: a
-string as it is, or a vector of rows joined, the empty ones left out - so a
-caller can write a row that only sometimes has something in it as `""` rather
-than building the list conditionally. Every widget takes its `note` this way.
+What a widget says under its title, as one row with a newline between its
+lines: a string as it is, or a vector of rows joined, the empty ones left out -
+so a caller can write a row that only sometimes has something in it as `""`
+rather than building the list conditionally. Every widget takes its `note` this
+way, and a note keeps the faces it was given.
 """
-notetext(s::AbstractString) = String(s)
-notetext(v::AbstractVector) = join((String(r) for r in v if !isempty(r)), '\n')
+notetext(s::AbstractString) = row(s)
+function notetext(v::AbstractVector)
+    rs = [row(r) for r in v if !isempty(r)]
+    isempty(rs) ? row("") : rowcat(foldl((a, b) -> rowcat(a, "\n", b), rs))
+end
