@@ -306,13 +306,16 @@ rest. A face with no entry falls back through a fixed table (`string_delim` to
 `string`, every bracket to `parentheses`, `opassignment` to `assignment` to
 `operator`, `typedec` to `type`, `bool` to `number`) and then to nothing.
 
-The highlighter is Julia's own, where the running Julia has one: from 1.12,
-`Markdown` loads `JuliaSyntaxHighlighting`, and an extension on it answers for
-a block marked `julia`, `jl`, `jldoctest` or nothing at all. Everywhere else -
-every other language, and Julia before 1.12 - it is a stub with no ranges, and
-the block is drawn in `codeblock` alone. A host that wants another language
-adds a method for its own `lang` string, specialised on `code::String` as the
-extension's is; nothing here needs to change for it. `highlighted_lines(lang,
+A language is a type: `codemime(lang)` is `text/julia` for a block marked
+`julia`, `jl`, `jldoctest` or nothing at all, and `text/x-python` for one
+marked `python`, and `highlight` has a method for each type it knows. Julia's
+own is the one there is, where the running Julia has it: from 1.12, `Markdown`
+loads `JuliaSyntaxHighlighting`, and an extension on it answers
+`MIME"text/julia"`. Everywhere else - every other language, and Julia before
+1.12 - it is a stub with no ranges, and the block is drawn in `codeblock`
+alone. A host that wants another language adds
+`highlight(::MIME"text/x-python", code::AbstractString)`, which sits beside
+Julia's rather than replacing it; nothing here needs to change for it. `highlighted_lines(lang,
 code, style)` is the same colours with nothing else - no background, no wrap -
 for a host that draws a block of code its own way.
 
@@ -379,8 +382,8 @@ is likely to have already or one it uses once, where it sets a widget up:
   what a host drawing a field or a list of its own shares with the widgets:
   `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
   `ESCAPE`
-* `MarkdownStyle`, `MDRow`, `highlight` and `highlighted_lines`, which a host
-  drawing markdown builds, reads, extends and borrows
+* `MarkdownStyle`, `MDRow`, `highlight`, `codemime` and `highlighted_lines`,
+  which a host drawing markdown builds, reads, extends and borrows
 * `ACTIONS`, which is what `handle!` answers
 * `HeldTerminal`, what `enter_terminal` returns, whose `mouse` a host that
   toggles the mouse sets

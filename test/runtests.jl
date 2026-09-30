@@ -1541,6 +1541,15 @@ end
     @test TermInput.facestyle(st, :keyword) == ("", "")
     # Every other language is the stub's, everywhere.
     @test highlight("python", "def f(): pass") == Tuple{UnitRange{Int},Symbol}[]
+    # A fence's language is a type, and the Julia ones are one type.
+    @test TermInput.codemime(" Python ") == MIME"text/x-python"()
+    @test all(l -> TermInput.codemime(l) == MIME"text/julia"(), ("julia", "JL", "jldoctest", ""))
+    # A host's highlighter for a language of its own is a method on its type,
+    # beside Julia's rather than in place of it.
+    @eval TermInput.highlight(::MIME"text/x-wltest", code::AbstractString) =
+        [(firstindex(code):lastindex(code), :string)]
+    @test highlight("wltest", "abc") == [(1:3, :string)]
+    @test highlight("python", "def f(): pass") == Tuple{UnitRange{Int},Symbol}[]
     if VERSION >= v"1.12"
         # `Markdown` loads JuliaSyntaxHighlighting, which loads the extension.
         @test Base.get_extension(TermInput, :TermInputHighlightExt) !== nothing
@@ -1549,6 +1558,7 @@ end
         @test any(r -> r[1] == 10:10 && r[2] in (:funcdef, :funcall), hl)   # by version
         @test all(f -> !startswith(String(f), "julia_"), last.(hl))
         @test highlight("", "x = 1") == highlight("jldoctest", "x = 1") != []
+        @test highlight(MIME"text/julia"(), SubString("x = 1")) == highlight("julia", "x = 1")
         rs = markdown_rows(Markdown.parse("```julia\nfunction f() end\n```"), 30;
                            style = MarkdownStyle(faces = Dict(:keyword => Y)))
         @test occursin("\e[33mfunction\e[39m", rs[1].text)

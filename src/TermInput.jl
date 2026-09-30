@@ -107,7 +107,8 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         newline!, insertblock!, backspace!, deletechar!, killline!,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
-        DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, highlighted_lines,
+        DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, codemime,
+        highlighted_lines,
         BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal"""))
 end
 

@@ -101,18 +101,40 @@ struct MDRow
 end
 
 """
-    highlight(lang, code) -> Vector{Tuple{UnitRange{Int},Symbol}}
+    highlight(mime::MIME, code) -> Vector{Tuple{UnitRange{Int},Symbol}}
+    highlight(lang::AbstractString, code)
 
-Byte ranges of `code` and the face each is drawn in, for a code block written
-in `lang`. The face is looked up in a [`MarkdownStyle`](@ref)'s `faces`.
+Byte ranges of `code` and the face each is drawn in, for a code block of type
+`mime`. The face is looked up in a [`MarkdownStyle`](@ref)'s `faces`.
 
-This method is the stub: no ranges, so the block is drawn in `codeblock` alone.
-Julia's own highlighter answers for Julia from 1.12, through an extension on
-`JuliaSyntaxHighlighting`, which `Markdown` loads there. A host that wants
-another language adds a method for its own `lang`, specialised on the code's
-type the way that one is - `(::AbstractString, ::String)`.
+A language is a type, so a highlighter is a method on its own `MIME`, and one
+never replaces another: Julia's own answers `MIME"text/julia"` from 1.12,
+through an extension on `JuliaSyntaxHighlighting`, which `Markdown` loads there,
+and a host that wants another language adds `highlight(::MIME"text/x-python",
+code::AbstractString)`, say. Every other type is this stub's: no ranges, so the
+block is drawn in `codeblock` alone.
+
+Given a fence's language, `highlight` asks the type [`codemime`](@ref) names.
 """
-highlight(lang::AbstractString, code::AbstractString) = Tuple{UnitRange{Int},Symbol}[]
+highlight(::MIME, code::AbstractString) = Tuple{UnitRange{Int},Symbol}[]
+highlight(lang::AbstractString, code::AbstractString) = highlight(codemime(lang), code)
+
+"""The fence languages read as Julia. An empty one is too: an unlabelled block
+in a Julia project's comments is Julia far more often than not, and one that
+is not costs only colour."""
+const JULIA_FENCES = ("julia", "jl", "jldoctest", "")
+
+"""
+    codemime(lang) -> MIME
+
+The type of a code block whose fence says `lang`: `text/julia` for `julia`,
+`jl`, `jldoctest` or nothing at all, and `text/x-` and the language, lowercased,
+for anything else - `python` is `text/x-python`.
+"""
+function codemime(lang::AbstractString)
+    l = lowercase(strip(lang))
+    l in JULIA_FENCES ? MIME"text/julia"() : MIME("text/x-" * l)
+end
 
 """Where a face with no style of its own looks next: a delimiter as what it
 delimits, every bracket as `parentheses`, and the narrower kinds of operator as
