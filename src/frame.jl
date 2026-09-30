@@ -43,8 +43,10 @@ Three things about the write, none of them about what is in the frame:
     is four kilobytes on Linux, so a frame is several reads however it was
     written.
 
-**Every row is its line deleted and written again**: the scroll region set to
-that row alone, `\\e[M` there, and the row. A hyperlink leaves a marker on the
+**Every row is its line deleted and written again**: `\\e[M` at that row, which
+takes the line out and pulls the ones below it up, and `\\e[L` there, which puts
+a blank line back and pushes them down again, so the row is written on a blank
+line and every other line is where it was. A hyperlink leaves a marker on the
 line it was drawn on in xterm.js, which frees one only when its line is deleted
 or trimmed, and the alternate screen trims nothing - so a row overwritten in
 place, or erased, kept every link it ever held. Thirty links a frame was 30000
@@ -54,10 +56,17 @@ them all in time quadratic in the count: 5 s then, 100 s after four thousand
 host, and a pty host that misses its heartbeat for 12 s is restarted with every
 terminal in it - which was quitting a full-screen program over Remote-SSH. An
 `id` on the link only bounds it by url and row, which a scrolled page outgrows;
-a delete bounds it by what is on the screen. One row at a time, so a terminal
-that draws mid-frame shows that row blank and nothing else moved, which is all
-an erase ever showed; never a clear, which is a blank frame and a flicker on
-every key.
+a delete bounds it by what is on the screen. One row at a time, and never a
+clear, which is a blank frame and a flicker on every key.
+
+**Not a scroll region of the one row.** A region is two lines at the least, by
+DEC's definition of it, and tmux ignores one a line tall (3.5, 2026-09-30), so the
+`\\e[M` under it deleted in the whole screen: each row pulled the rest up one,
+the row after it was written over what had been two rows down, and a row that
+did not cover its line - a verbatim piece stops at its last written cell -
+showed the frame before at half height past its end. The
+region is reset once, before the first row, since a delete or an insert does
+nothing on a line outside it.
 
 **Auto-wrap is off while the frame is written** (DECAWM, `\\e[?7l`), and on
 again at its end, so a program run after it sees the terminal as it was. A
@@ -69,18 +78,18 @@ is no pending wrap either, the state writing the last column leaves the cursor
 in and that terminals disagree about: xterm.js counts it past the last column,
 Terminal.app keeps it *on* the last column, where an erase after a full row
 took the right border off every row. Nothing is erased after a row regardless,
-and each row starts by setting the scroll region, which homes the cursor.
+and each row starts by putting the cursor at its line.
 """
 function frame_bytes(rows::AbstractVector{<:AbstractString}, title::AbstractString = "",
                      cur::Union{Nothing,Tuple{Int,Int}} = nothing; h::Int = 0)
     io = IOBuffer()
     cio = IOContext(io, :color => true)
-    print(io, "\e[?2026h\e[?25l\e[?7l")
+    print(io, "\e[?2026h\e[?25l\e[?7l\e[r")
     for i in 1:max(h, length(rows))
-        print(io, "\e[", i, ";", i, "r\e[", i, "H\e[M")
+        print(io, "\e[", i, "H\e[M\e[L")
         i <= length(rows) && writerow(cio, rows[i])
     end
-    print(io, "\e[r\e[?7h", title)
+    print(io, "\e[?7h", title)
     cur === nothing || print(io, "\e[", cur[1], ";", cur[2], "H\e[?25h")
     print(io, "\e[?2026l")
     take!(io)

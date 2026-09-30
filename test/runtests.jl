@@ -1181,22 +1181,24 @@ end
     b = String(frame_bytes(["ab", "cd"], "", (2, 1)))
     # Held by the terminal until the closing sequence, drawn with the cursor
     # hidden, and the cursor put where the host said and shown only then.
-    @test startswith(b, "\e[?2026h\e[?25l\e[?7l\e[1;1r")
-    @test endswith(b, "\e[r\e[?7h\e[2;1H\e[?25h\e[?2026l")
-    # Each row's line deleted before it is written, and only that line: the
-    # scroll region is the row. A line xterm.js deletes takes the markers of
-    # the links drawn on it; one overwritten or erased kept them all.
-    @test occursin("\e[1;1r\e[1H\e[Mab\e[2;2r\e[2H\e[Mcd\e[r\e[?7h", b)
+    @test startswith(b, "\e[?2026h\e[?25l\e[?7l\e[r\e[1H")
+    @test endswith(b, "cd\e[?7h\e[2;1H\e[?25h\e[?2026l")
+    # Each row's line deleted before it is written, and a blank one put back
+    # in its place, so nothing below it moves. A line xterm.js deletes takes
+    # the markers of the links drawn on it; one overwritten or erased kept
+    # them all. Not by a scroll region of the one row, which tmux ignores.
+    @test occursin("\e[1H\e[M\e[Lab\e[2H\e[M\e[Lcd\e[?7h", b)
+    @test !occursin(r"\e\[\d+;\d+r", b)
     @test !occursin("\e[K", b) && !occursin("\e[J", b) && !occursin('\n', b)
     # No cursor to show: it stays hidden, and nothing moves it.
     n = String(frame_bytes(["ab"]))
-    @test endswith(n, "\e[Mab\e[r\e[?7h\e[?2026l") && !occursin("?25h", n)
+    @test endswith(n, "\e[M\e[Lab\e[?7h\e[?2026l") && !occursin("?25h", n)
     # The title goes after the frame and before the caret, inside the hold.
     t = String(frame_bytes(["x"], "\e]2;a title\e\\", (1, 1)))
-    @test occursin("\e[r\e[?7h\e]2;a title\e\\\e[1;1H\e[?25h", t)
+    @test occursin("x\e[?7h\e]2;a title\e\\\e[1;1H\e[?25h", t)
     # Rows the frame did not bring, to the screen's height, are deleted too.
     f = String(frame_bytes(["ab"], "", nothing; h = 3))
-    @test occursin("\e[Mab\e[2;2r\e[2H\e[M\e[3;3r\e[3H\e[M\e[r", f)
+    @test occursin("\e[M\e[Lab\e[2H\e[M\e[L\e[3H\e[M\e[L\e[?7h", f)
     # A row wider than the screen does not wrap onto the next: auto-wrap is
     # off from before the first row to after the last, and on again after,
     # and the next row is put at its own line whatever the cursor did.
@@ -1204,21 +1206,21 @@ end
     off, on = findfirst("\e[?7l", wide), findfirst("\e[?7h", wide)
     @test last(off) < first(findfirst("abcdef", wide)) &&
           first(on) > last(findfirst("gh", wide))
-    @test occursin("abcdef\e[2;2r\e[2H\e[Mgh", wide)
+    @test occursin("abcdef\e[2H\e[M\e[Lgh", wide)
     # Rows of faces are written by StyledStrings, and a row as a string, or
     # with no faces, as it is.
     out(r) = sprint(print, r; context = :color => true)
     bold = faced("ab", Face(weight = :bold))
     fr = String(frame_bytes([bold, TermInput.row("cd"), "\e[1mef"]))
-    @test occursin(string("\e[1H\e[M", out(bold), "\e[2;2r"), fr)
-    @test occursin("\e[2H\e[Mcd\e[3;3r\e[3H\e[M\e[1mef\e[r", fr)
+    @test occursin(string("\e[1H\e[M\e[L", out(bold), "\e[2H"), fr)
+    @test occursin("\e[2H\e[M\e[Lcd\e[3H\e[M\e[L\e[1mef\e[?7h", fr)
     # A verbatim piece is written as it is and closed, and what follows it is
     # written from the column after its width, however little it drew.
     v = rowcat("│", verbatim("\e[31mab", 5), faced("│", Face(weight = :bold)))
     fv = String(frame_bytes([v]))
-    @test occursin(string("\e[M│\e[31mab\e[0m\e[7G", out(faced("│", Face(weight = :bold)))), fv)
+    @test occursin(string("\e[M\e[L│\e[31mab\e[0m\e[7G", out(faced("│", Face(weight = :bold)))), fv)
     two = rowcat(verbatim("x", 3), " ", verbatim("y", 2), "z")
-    @test occursin("\e[Mx\e[0m\e[4G y\e[0m\e[7Gz", String(frame_bytes([two])))
+    @test occursin("\e[M\e[Lx\e[0m\e[4G y\e[0m\e[7Gz", String(frame_bytes([two])))
 end
 
 @testset "no frame while input is waiting" begin
