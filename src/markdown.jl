@@ -110,7 +110,7 @@ Byte ranges of `code` and the face each is drawn in, for a code block of type
 A language is a type, so a highlighter is a method on its own `MIME`, and one
 never replaces another: Julia's own answers `MIME"text/julia"` from 1.12,
 through an extension on `JuliaSyntaxHighlighting`, which `Markdown` loads there,
-and a host that wants another language adds `highlight(::MIME"text/x-python",
+and a host that wants another language adds `highlight(::MIME"text/python",
 code::AbstractString)`, say. Every other type is this stub's: no ranges, so the
 block is drawn in `codeblock` alone.
 
@@ -128,12 +128,13 @@ const JULIA_FENCES = ("julia", "jl", "jldoctest", "")
     codemime(lang) -> MIME
 
 The type of a code block whose fence says `lang`: `text/julia` for `julia`,
-`jl`, `jldoctest` or nothing at all, and `text/x-` and the language, lowercased,
-for anything else - `python` is `text/x-python`.
+`jl`, `jldoctest` or nothing at all, and `text/` and the language, lowercased,
+for anything else - `python` is `text/python`. Not the registered types: the
+fence's word is all there is to go on, and the type only picks a method.
 """
 function codemime(lang::AbstractString)
     l = lowercase(strip(lang))
-    l in JULIA_FENCES ? MIME"text/julia"() : MIME("text/x-" * l)
+    l in JULIA_FENCES ? MIME"text/julia"() : MIME("text/" * l)
 end
 
 """Where a face with no style of its own looks next: a delimiter as what it

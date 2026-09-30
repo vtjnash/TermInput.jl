@@ -1556,11 +1556,11 @@ end
     # Every other language is the stub's, everywhere.
     @test highlight("python", "def f(): pass") == Tuple{UnitRange{Int},Symbol}[]
     # A fence's language is a type, and the Julia ones are one type.
-    @test TermInput.codemime(" Python ") == MIME"text/x-python"()
+    @test TermInput.codemime(" Python ") == MIME"text/python"()
     @test all(l -> TermInput.codemime(l) == MIME"text/julia"(), ("julia", "JL", "jldoctest", ""))
     # A host's highlighter for a language of its own is a method on its type,
     # beside Julia's rather than in place of it.
-    @eval TermInput.highlight(::MIME"text/x-wltest", code::AbstractString) =
+    @eval TermInput.highlight(::MIME"text/wltest", code::AbstractString) =
         [(firstindex(code):lastindex(code), :string)]
     @test highlight("wltest", "abc") == [(1:3, :string)]
     @test highlight("python", "def f(): pass") == Tuple{UnitRange{Int},Symbol}[]

@@ -307,14 +307,14 @@ rest. A face with no entry falls back through a fixed table (`string_delim` to
 `operator`, `typedec` to `type`, `bool` to `number`) and then to nothing.
 
 A language is a type: `codemime(lang)` is `text/julia` for a block marked
-`julia`, `jl`, `jldoctest` or nothing at all, and `text/x-python` for one
+`julia`, `jl`, `jldoctest` or nothing at all, and `text/python` for one
 marked `python`, and `highlight` has a method for each type it knows. Julia's
 own is the one there is, where the running Julia has it: from 1.12, `Markdown`
 loads `JuliaSyntaxHighlighting`, and an extension on it answers
 `MIME"text/julia"`. Everywhere else - every other language, and Julia before
 1.12 - it is a stub with no ranges, and the block is drawn in `codeblock`
 alone. A host that wants another language adds
-`highlight(::MIME"text/x-python", code::AbstractString)`, which sits beside
+`highlight(::MIME"text/python", code::AbstractString)`, which sits beside
 Julia's rather than replacing it; nothing here needs to change for it. `highlighted_lines(lang,
 code, style)` is the same colours with nothing else - no background, no wrap -
 for a host that draws a block of code its own way.
