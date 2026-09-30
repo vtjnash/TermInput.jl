@@ -1463,58 +1463,58 @@ end
     # exactly the width asked for, whatever went into it.
     function drawn(s, w = 40; kw...)
         rs = markdown_rows(md(s), w; kw...)
-        @test all(r -> awidth(r.text) == w, rs)
+        @test all(r -> awidth(ansi(r.text)) == w, rs)
         rs
     end
-    texts(rs) = [rstrip(astrip(r.text)) for r in rs]
+    texts(rs) = [rstrip(astrip(ansi(r.text))) for r in rs]
     B, BG = Face(weight = :bold), Face(background = SimpleColor(:blue))
     I, D, U = Face(slant = :italic), Face(weight = :light), Face(underline = true)
     Y = Face(foreground = SimpleColor(:yellow))
     # What a face writes round a word, as StyledStrings has it for this
     # terminal: italic and strikethrough are what its terminfo says they are.
-    around(f::Face, s) = TermInput.emit([TermInput.Run(s, [f])])
+    around(f::Face, s) = ansi(TermInput.emit([TermInput.Run(s, [f])]))
 
     @testset "one per element" begin
         @test texts(drawn("just words")) == ["just words"]
         @test texts(drawn("# One\n\n###### Six")) == ["One", "", "Six"]
         # The level is carried by the style and nothing else.
         rs = drawn("## Two"; style = MarkdownStyle(h2 = B))
-        @test startswith(rs[1].text, "\e[1mTwo\e[22m")
+        @test startswith(ansi(rs[1].text), "\e[1mTwo\e[22m")
         rs = drawn("a **b** *c* ~~d~~";
                    style = MarkdownStyle(bold = B, italic = I,
                                          strike = Face(strikethrough = true)))
-        @test occursin("\e[1mb\e[22m", rs[1].text)
-        @test occursin(around(I, "c"), rs[1].text)
+        @test occursin("\e[1mb\e[22m", ansi(rs[1].text))
+        @test occursin(around(I, "c"), ansi(rs[1].text))
         # The stdlib parses `~~` and HTML blocks from 1.12 and 1.14.
         isdefined(Markdown, :Strikethrough) &&
-            @test occursin(around(Face(strikethrough = true), "d"), rs[1].text)
+            @test occursin(around(Face(strikethrough = true), "d"), ansi(rs[1].text))
         # Nested as written: the inner style inside the outer.
         rs = drawn("**a *b* c**"; style = MarkdownStyle(bold = B, italic = U))
-        @test startswith(rs[1].text, "\e[1ma \e[4mb\e[24m c\e[22m ")
+        @test startswith(ansi(rs[1].text), "\e[1ma \e[4mb\e[24m c\e[22m ")
         # A code span keeps its backticks, in `code_tick` inside `code`.
         rs = drawn("x `y` z"; style = MarkdownStyle(code = BG, code_tick = D))
         # One background, the backticks dimmed inside it.
-        @test occursin("x \e[44m\e[2m`\e[22my\e[2m`\e[49m\e[22m z", rs[1].text)
+        @test occursin("x \e[44m\e[2m`\e[22my\e[2m`\e[49m\e[22m z", ansi(rs[1].text))
         # A weight inside a weight replaces it, and the outer one comes back
         # after - `22` ends bold and dim alike. Before 1.12, StyledStrings
         # writes one weight over the other, which a terminal draws as both.
         rs = drawn("**a `b` c**"; style = MarkdownStyle(bold = B, code_tick = D))
         @test occursin("\e[1ma \e[22m\e[2m`\e[22m\e[1mb\e[22m\e[2m`\e[22m\e[1m c\e[22m",
-                       rs[1].text) broken = VERSION < v"1.12"
+                       ansi(rs[1].text)) broken = VERSION < v"1.12"
         @test rs[1].src == "a `b` c"
         # A style inside a link is merged over it, and the link goes on after.
         rs = drawn("[x **b** y](u)"; style = MarkdownStyle(link = U, bold = B))
-        @test startswith(rs[1].text, "\e[4mx \e[1mb\e[22m y\e[24m")
+        @test startswith(ansi(rs[1].text), "\e[4mx \e[1mb\e[22m y\e[24m")
         # A close that ends none of what is open leaves it alone.
         rs = drawn("[x **b** y](u)"; style = MarkdownStyle(link = BG, bold = B))
-        @test startswith(rs[1].text, "\e[44mx \e[1mb\e[22m y\e[49m")
+        @test startswith(ansi(rs[1].text), "\e[44mx \e[1mb\e[22m y\e[49m")
         # Julia reads a double backtick as maths, so the span is built by hand.
         rs = markdown_rows(Markdown.MD(Any[Markdown.Paragraph(Any[Markdown.Code("", "a`b")])]), 10)
         @test texts(rs) == ["``a`b``"]
         # A link is its label; the url is the host's.
         rs = drawn("see [the docs](https://example.com) now";
                    style = MarkdownStyle(link = U))
-        @test rstrip(rs[1].text) == "see \e[4mthe docs\e[24m now"
+        @test rstrip(ansi(rs[1].text)) == "see \e[4mthe docs\e[24m now"
         @test texts(drawn("![a cat](cat.png)")) == ["a cat"]
         # A list: the bullet, or numbers right-aligned to the widest.
         @test texts(drawn("- a\n- b")) == ["• a", "• b"]
@@ -1528,9 +1528,9 @@ end
         @test texts(drawn("> said\n>\n> twice")) == ["│ said", "│", "│ twice"]
         rs = drawn("!!! warning \"Mind\"\n    the gap";
                    style = MarkdownStyle(warning = Y))
-        @test [rstrip(r.text) for r in rs] == ["\e[33m│ \e[39m\e[33mMind\e[39m", "\e[33m│ \e[39mthe gap"]
+        @test [rstrip(ansi(r.text)) for r in rs] == ["\e[33m│ Mind\e[39m", "\e[33m│ \e[39mthe gap"]
         @test texts(drawn("!!! tip\n    x")) == ["│ Tip", "│ x"]
-        @test [r.text for r in drawn("---"; style = MarkdownStyle(rule = Y))] ==
+        @test [ansi(r.text) for r in drawn("---"; style = MarkdownStyle(rule = Y))] ==
               ["\e[33m" * "─"^40 * "\e[39m"]
         @test texts(drawn("a\\\nb")) == ["a", "b"]           # a LineBreak
         @test texts(drawn("\$\$x^2\$\$")) == ["\$\$x^2\$\$"]
@@ -1542,17 +1542,17 @@ end
 
     @testset "code blocks" begin
         rs = drawn("```\nx = 1\n\ty\n```"; style = MarkdownStyle(codeblock = BG))
-        @test [r.text for r in rs] == ["  \e[44m x = 1" * " "^32 * "\e[49m",
+        @test [ansi(r.text) for r in rs] == ["  \e[44m x = 1" * " "^32 * "\e[49m",
                             "  \e[44m         y" * " "^28 * "\e[49m"]
         # Padded to the width, background and all, so the block reads as one.
-        @test endswith(rs[1].text, "\e[49m")
+        @test endswith(ansi(rs[1].text), "\e[49m")
         # The source keeps the tab; the row draws it as its columns.
         @test rs[2].src == "\ty"
         # Hard-wrapped, never reflowed: each row a piece of the one line.
         rs = drawn("```\n" * "a "^30 * "\n```", 20)
         @test length(rs) == 4 && rs[1].first && !any(r -> r.first, rs[2:end])
         @test all(r -> r.src == rstrip("a "^30), rs)
-        @test astrip(rs[1].text) == "   " * "a a a a a a a a a"[1:17]
+        @test astrip(ansi(rs[1].text)) == "   " * "a a a a a a a a a"[1:17]
         # With no highlighter for the language, the block is `codeblock` alone.
         @test TermInput.highlight("python", "x = 1") == Tuple{UnitRange{Int},Symbol}[]
     end
@@ -1564,17 +1564,17 @@ end
         @test texts(drawn(t; style = MarkdownStyle(box = TermInput.BOXES.SQUARE)))[1] ==
               "┌───────┬────┐"
         rs = drawn(t; style = MarkdownStyle(table_head = B, table_rule = Y))
-        @test occursin("\e[1ma\e[22m", rs[2].text)
-        @test startswith(rs[1].text, "\e[33m╭")
+        @test occursin("\e[1ma\e[22m", ansi(rs[2].text))
+        @test startswith(ansi(rs[1].text), "\e[33m╭")
         @test rs[4].src == "| one | 2 |"
         # Fitted to the width: the widest column narrowed first, and its cell
         # wrapped rather than cut - and then a rule between the body's rows.
         wide = "| k | v |\n|---|---|\n| a | " * "word "^12 * "|\n| b | c |"
         rs = drawn(wide, 30)
-        @test all(r -> awidth(r.text) == 30, rs)
+        @test all(r -> awidth(ansi(r.text)) == 30, rs)
         @test occursin("word", join(texts(rs)))
-        @test count(r -> occursin("word", r.text), rs) > 1
-        @test count(r -> startswith(astrip(r.text), "├"), rs) == 2
+        @test count(r -> occursin("word", ansi(r.text)), rs) > 1
+        @test count(r -> startswith(astrip(ansi(r.text)), "├"), rs) == 2
         # A column with no room is narrowed only so far.
         @test TermInput.fitcolumns([50, 50], 10) == [TermInput.TABLE_FLOOR, TermInput.TABLE_FLOOR]
         @test TermInput.fitcolumns([3, 30], 30) == [3, 20]
@@ -1594,13 +1594,13 @@ end
         rs = drawn("xxxxxx `aaa bbb ccc` yy", 12; style = MarkdownStyle(code = BG))
         @test length(rs) == 2
         for r in rs
-            @test count("\e[44m", r.text) == count("\e[49m", r.text)
-            @test !endswith(rstrip(r.text), "\e[44m")
+            @test count("\e[44m", ansi(r.text)) == count("\e[49m", ansi(r.text))
+            @test !endswith(rstrip(ansi(r.text)), "\e[44m")
         end
-        @test occursin("\e[44m`aaa\e[49m", rs[1].text)
-        @test startswith(rs[2].text, "\e[44mbbb ccc`\e[49m")
+        @test occursin("\e[44m`aaa\e[49m", ansi(rs[1].text))
+        @test startswith(ansi(rs[2].text), "\e[44mbbb ccc`\e[49m")
         # The padding is never painted.
-        @test all(r -> !occursin(r"\e\[48;5;236m\s*$", r.text), rs)
+        @test all(r -> !occursin(r"\e\[48;5;236m\s*$", ansi(r.text)), rs)
     end
 
     @testset "the source map" begin
@@ -1626,7 +1626,7 @@ end
         # space. The stdlib keeps the newline from 1.14 only.
         if VERSION >= v"1.14.0-DEV"
             rs = drawn("one\ntwo"; breaks = true)
-            @test [(astrip(r.text) |> rstrip, r.src, r.first) for r in rs] ==
+            @test [(astrip(ansi(r.text)) |> rstrip, r.src, r.first) for r in rs] ==
                   [("one", "one", true), ("two", "two", true)]
             @test texts(drawn("one\ntwo")) == ["one two"]
             # Two spaces at a line's end break it either way, as CommonMark says.
@@ -1641,7 +1641,7 @@ end
         @test texts(rs) == ["中文", "中文", "中文"]
         rs = drawn("éééé", 2)
         @test texts(rs) == ["éé", "éé"]
-        @test all(r -> awidth(r.text) == 2, rs)
+        @test all(r -> awidth(ansi(r.text)) == 2, rs)
         # A word wider than the row is split by columns.
         @test texts(drawn("x" ^ 25, 10)) == ["x"^10, "x"^10, "x"^5]
         # Too narrow for a marker or a box is cut to the width, never wider.
@@ -1652,7 +1652,7 @@ end
 
     @testset "no style asked for, no escape written" begin
         doc = "# h\n\n**b** *i* `c` [l](u)\n\n> q\n\n```\nx\n```\n\n| a |\n|---|\n| b |\n\n---"
-        @test !any(r -> occursin('\e', r.text), drawn(doc))
+        @test !any(r -> occursin('\e', ansi(r.text)), drawn(doc))
     end
 
     @testset "an element it does not know is its text" begin
@@ -1697,14 +1697,14 @@ end
         @test highlight(MIME"text/julia"(), SubString("x = 1")) == highlight("julia", "x = 1")
         rs = markdown_rows(Markdown.parse("```julia\nfunction f() end\n```"), 30;
                            style = MarkdownStyle(faces = Dict(:keyword => Y)))
-        @test occursin("\e[33mfunction\e[39m", rs[1].text)
-        @test astrip(rs[1].text) == rpad("   function f() end", 30)
+        @test occursin("\e[33mfunction\e[39m", ansi(rs[1].text))
+        @test astrip(ansi(rs[1].text)) == rpad("   function f() end", 30)
         @test rs[1].src == "function f() end"
         # The colours alone, for a host drawing code its own way: a line each,
         # tabs as written, each line closed.
         ls = TermInput.highlighted_lines("julia", "function f()\n\tend",
                                          MarkdownStyle(faces = Dict(:keyword => Y)))
-        @test ls == ["\e[33mfunction\e[39m f()", "\t\e[33mend\e[39m"]
+        @test ansi.(ls) == ["\e[33mfunction\e[39m f()", "\t\e[33mend\e[39m"]
     else
         @test TermInput.highlighted_lines("julia", "a\nb") == ["a", "b"]
         # Before 1.12 there is no highlighter, and the extension never loads.

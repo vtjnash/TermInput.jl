@@ -86,15 +86,15 @@ end
 """
     MDRow(text, src, first)
 
-One row of rendered markdown. `text` is what prints: exactly the width asked
-for, escapes inline. `src` is the line it came from as it was written, with no
-escapes and nothing wrapped, and `first` says whether this row is where that
+One row of rendered markdown. `text` is what prints: a [`Row`](@ref) exactly
+the width asked for, in the style's faces. `src` is the line it came from as it
+was written, plain and with nothing wrapped, and `first` says whether this row is where that
 line starts - so the rows of a paragraph wrapped over three are one `src`, and
 `first` on the first. A copy of a range of rows is the `src` of each row that
 is `first`, or of the first row in the range.
 """
 struct MDRow
-    text::String
+    text::Row
     src::String
     first::Bool
 end
@@ -171,11 +171,11 @@ end
 
 const Line = Vector{Run}
 
-"""A row of runs as the string that prints it: each run in its styles merged,
-written by StyledStrings, which writes only what differs between neighbours -
-so a code span is one background with its backticks dimmed inside it, not
-three - and turns off whatever a close took with it that is still wanted.
-Nothing is open at the end of the row."""
+"""A row of runs as the row that prints it: each run in its styles merged, as
+one face over its range. StyledStrings writes it, and writes only what differs
+between neighbours - so a code span is one background with its backticks
+dimmed inside it, not three - and turns off whatever a close took with it that
+is still wanted. Nothing is open at the end of the row."""
 function emit(line::Line)
     anns = Annot[]
     io = IOBuffer()
@@ -186,14 +186,11 @@ function emit(line::Line)
         isempty(r.styles) ||
             push!(anns, annot(i+1:position(io), :face, foldl(merge, r.styles)))
     end
-    text = String(take!(io))
-    isempty(anns) && return text
-    print(IOContext(io, :color => true), Row(text, anns))
-    String(take!(io))
+    Row(String(take!(io)), anns)
 end
 
 plaintext(line::Line) = join(r.text for r in line)
-runwidth(line::Line) = sum((awidth(r.text) for r in line); init = 0)
+runwidth(line::Line) = sum((textwidth(r.text) for r in line); init = 0)
 
 """Wrap a line of runs to rows `w` columns wide: at the last space that fits,
 or, where there is none - a url, a long identifier, or `hard` for code, which
@@ -322,12 +319,12 @@ is every row's `src`, and the first row is its `first`."""
 function wrapped!(out::Vector{MDRow}, line::Line, w::Int; hard::Bool = false,
                   src::String = String(rstrip(plaintext(line))))
     for (k, row) in enumerate(wraprun(line, w; hard))
-        push!(out, MDRow(apad(emit(row), w), src, k == 1))
+        push!(out, MDRow(rowpad(emit(row), w), src, k == 1))
     end
     out
 end
 
-blank(w::Int) = MDRow(" "^max(w, 0), "", true)
+blank(w::Int) = MDRow(row(" "^max(w, 0)), "", true)
 
 """Blocks in order, a blank row between each two when `loose` - which every
 run of blocks is but the items of a tight list."""
@@ -346,12 +343,13 @@ end
 """The rows of a block drawn `pw` columns in from the left: the first behind
 `first`, the rest behind `rest`, and a row's `src` the line it starts behind
 the prefix it starts behind - what a copy of that line would have in it."""
-function prefixed!(out::Vector{MDRow}, rows::Vector{MDRow}, first::String, rest::String)
+function prefixed!(out::Vector{MDRow}, rows::Vector{MDRow}, first::AbstractString,
+                   rest::AbstractString)
     src = ""
     for (k, r) in enumerate(rows)
         p = k == 1 ? first : rest
-        r.first && (src = String(rstrip(string(astrip(p), r.src))))
-        push!(out, MDRow(string(p, r.text), src, r.first))
+        r.first && (src = String(rstrip(string(String(p), r.src))))
+        push!(out, MDRow(rowcat(p, r.text), src, r.first))
     end
     out
 end
@@ -444,8 +442,8 @@ function block!(out::Vector{MDRow}, c::Markdown.Code, w::Int, ctx::Ctx)
         for (k, row) in enumerate(wraprun(line, inner; hard = true))
             fill = max(0, inner - runwidth(row))
             base = with(Face[], cb)
-            text = string("  ", emit(vcat(Run(" ", base), row, Run(" "^fill, base))))
-            push!(out, MDRow(apad(text, w), rstrip(src), k == 1))
+            text = rowcat("  ", emit(vcat(Run(" ", base), row, Run(" "^fill, base))))
+            push!(out, MDRow(rowpad(text, w), rstrip(src), k == 1))
         end
     end
     out
@@ -466,7 +464,7 @@ function block!(out::Vector{MDRow}, l::Markdown.List, w::Int, ctx::Ctx)
     loose = l.loose && any(item -> length(item) > 1, l.items)
     for (k, item) in enumerate(l.items)
         marker = ordered ? string(lpad(string(l.ordered + k - 1), nw), ". ") : "• "
-        mw = awidth(marker)
+        mw = textwidth(marker)
         rows = blocks!(MDRow[], item, max(1, w - mw), ctx; loose)
         isempty(rows) && push!(rows, blank(max(1, w - mw)))
         k > 1 && loose && push!(out, blank(w))
@@ -579,8 +577,8 @@ end
 function aligned(line::Line, cw::Int, align::Symbol)
     d = max(0, cw - runwidth(line))
     s = emit(line)
-    align === :r ? string(" "^d, s) :
-    align === :c ? string(" "^(d ÷ 2), s, " "^(d - d ÷ 2)) : string(s, " "^d)
+    align === :r ? rowcat(" "^d, s) :
+    align === :c ? rowcat(" "^(d ÷ 2), s, " "^(d - d ÷ 2)) : rowcat(s, " "^d)
 end
 
 """A table, drawn in `style.box` at its indent: the header in `table_head`, the
@@ -618,44 +616,43 @@ function block!(out::Vector{MDRow}, t::Markdown.Table, w::Int, ctx::Ctx)
         h = maximum(length, wrapped)
         src = join((rstrip(plaintext(c)) for c in r), " | ")
         for j in 1:h
-            io = IOBuffer()
-            write(io, styled(string(l.left), rule))
+            r = styled(string(l.left), rule)
             for k in 1:n
                 line = j <= length(wrapped[k]) ? wrapped[k][j] : Run[]
-                write(io, " ", aligned(line, cw[k], align[k]), " ")
-                write(io, styled(string(k == n ? l.right : l.vertical), rule))
+                r = rowcat(r, " ", aligned(line, cw[k], align[k]), " ",
+                           styled(string(k == n ? l.right : l.vertical), rule))
             end
-            push!(out, MDRow(apad(String(take!(io)), w), string("| ", src, " |"), j == 1))
+            push!(out, MDRow(rowpad(r, w), string("| ", src, " |"), j == 1))
         end
         h
     end
-    push!(out, MDRow(apad(edge(box.top), w), "", true))
+    push!(out, MDRow(rowpad(edge(box.top), w), "", true))
     body!(cells[1], box.head)
     if length(cells) > 1
-        push!(out, MDRow(apad(edge(box.head_row), w), "", true))
+        push!(out, MDRow(rowpad(edge(box.head_row), w), "", true))
         tall = any(r -> any(k -> runwidth(r[k]) > cw[k], 1:n), cells[2:end])
         for (i, r) in enumerate(cells[2:end])
-            i > 1 && tall && push!(out, MDRow(apad(edge(box.row), w), "", true))
+            i > 1 && tall && push!(out, MDRow(rowpad(edge(box.row), w), "", true))
             body!(r, box.mid)
         end
     end
-    push!(out, MDRow(apad(edge(box.bottom), w), "", true))
+    push!(out, MDRow(rowpad(edge(box.bottom), w), "", true))
     out
 end
 
 """
-    highlighted_lines(lang, code, style = MarkdownStyle()) -> Vector{String}
+    highlighted_lines(lang, code, style = MarkdownStyle()) -> Vector{Row}
 
-`code` a line to each string, with the escapes of `style.faces` inline where
+`code` a row to each line, in the faces of `style.faces` where
 [`highlight`](@ref) paints it in `lang` - and nothing else: no background, no
-wrapping, tabs as they were. Each line closes what it opened. For a host that
+wrapping, tabs as they were. For a host that
 draws a block of code its own way, and wants the colours a code block in
 markdown would have.
 """
 function highlighted_lines(lang::AbstractString, code::AbstractString,
                            style::MarkdownStyle = MarkdownStyle())
     lines, _ = codelines(String(code), lang, style, Face[]; tabs = false)
-    String[emit(l) for l in lines]
+    Row[emit(l) for l in lines]
 end
 
 # --- the entry point --------------------------------------------------------
@@ -680,5 +677,5 @@ function markdown_rows(md::Markdown.MD, w::Int; style::MarkdownStyle = MarkdownS
     rows = blocks!(MDRow[], md.content, w, Ctx(style, breaks))
     # Every row is `w` already; this is the guarantee, for the one case that
     # is not - a box or a marker wider than a very narrow width - cut to fit.
-    [awidth(r.text) == w ? r : MDRow(apad(r.text, w), r.src, r.first) for r in rows]
+    [rowwidth(r.text) == w ? r : MDRow(rowpad(r.text, w), r.src, r.first) for r in rows]
 end

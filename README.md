@@ -266,7 +266,7 @@ import StyledStrings: Face
 md = Markdown.parse(body)                      # the host parses
 rs = markdown_rows(md, 80; style = MarkdownStyle(bold = Face(weight = :bold)),
                    breaks = true)
-rs[i].text     # the row: exactly 80 columns, escapes inline
+rs[i].text     # the row: a `Row` of exactly 80 columns, in the style's faces
 rs[i].src      # the written line it came from, unstyled - what a copy yields
 rs[i].first    # whether this row starts that line
 ```
@@ -281,7 +281,7 @@ rs[i].first    # whether this row starts that line
   per thing that is styled - headings by level, emphasis, code spans and
   blocks, links, quotes, admonitions by category, tables, rules - all empty by
   default, which draws with no escapes at all. A style inside another is merged
-  over it, and StyledStrings writes each row, so only what changes between two
+  over it, each row is a `Row` of faces, and StyledStrings writes it, so only what changes between two
   pieces is written, a colour given as RGB is drawn as RGB where the terminal
   has it and as its nearest of the 256 where it does not, and italic and
   strikethrough are what the terminal's terminfo says. Everything is closed at
@@ -331,7 +331,7 @@ alone. A host that wants another language adds
 `highlight(::MIME"text/python", code::AbstractString)`, which sits beside
 Julia's rather than replacing it; nothing here needs to change for it. `highlighted_lines(lang,
 code, style)` is the same colours with nothing else - no background, no wrap -
-for a host that draws a block of code its own way.
+as a `Row` to each line, for a host that draws a block of code its own way.
 
 ## The box, and the measuring
 
