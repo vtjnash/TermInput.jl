@@ -1179,6 +1179,31 @@ end
     @test input_waiting(t)
 end
 
+@testset "the README's program runs, from the README" begin
+    # The block itself, so the README cannot say one thing while this tests
+    # another.
+    readme = read(joinpath(@__DIR__, "..", "README.md"), String)
+    at = findfirst("### A whole program", readme)
+    m = match(r"```julia\n(.*?)```"s, readme, last(at))
+    host = Module(:ReadmeHost)
+    Base.include_string(host, m[1])
+    pick(input) = Base.invokelatest(host.pick, ["apple", "banana", "cherry"];
+                                    input = IOBuffer(input), output = IOBuffer())
+    @test pick("\r") == "apple"
+    @test pick("\e[B\r") == "banana"                  # the cursor, by arrow
+    @test pick("che\r") == "cherry"                   # narrowed by typing
+    @test pick("\e[200~ban\n\e[201~\r") == "banana"   # a paste is the query
+    @test pick("\e") === nothing
+    @test pick("\e[Z\e") === nothing                  # Shift-Tab is not escape
+    # What it wrote is a terminal put back as it was found.
+    out = IOBuffer()
+    Base.invokelatest(host.pick, ["a"]; input = IOBuffer("\r"), output = out)
+    s = String(take!(out))
+    @test startswith(s, "\e[?1049h\e[?25l")
+    @test occursin("\e[?2026h", s) && occursin("Pick one", s)
+    @test endswith(s, string(bracketed_paste(false), "\e[?25h\e[?1049l"))
+end
+
 @testset "the editor a widget hands the buffer to" begin
     # `⌥e` hands the buffer over and takes back whatever comes out. Nothing
     # here depends on an editor being installed: `define_editor` is the hook

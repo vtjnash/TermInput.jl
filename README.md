@@ -110,6 +110,41 @@ itself and takes none of what follows. A host that has nothing composes these.
   the host is the host's; the reports have to be parsed here only so that
   they do not arrive as keys.
 
+### A whole program
+
+A picker, full screen, from nothing but what this package exports:
+
+```julia
+using TermInput
+import TermInput: render, handle!, paste!
+
+function pick(labels; input = stdin, output = stdout)
+    c = Choice("Pick one", "", labels)
+    t = enter_terminal(input, output; altscreen = true, paste = true)
+    try
+        while true
+            h, w = displaysize(t)
+            write(t, frame_bytes(render(c, w, h)))
+            ev = readevent(t)
+            ev isa PasteEvent && (paste!(c, ev.text); continue)
+            ev isa KeyEvent || continue
+            handle!(c, ev.code) === :unhandled || continue
+            (i = picked(c, ev.code)) > 0 && return labels[i]
+            ev.code in (27, C_G) && return nothing
+        end
+    finally
+        leave_terminal(t)
+    end
+end
+```
+
+Everything the loop decides is in it: `↵` picks and escape or `^g` gives up,
+because `picked` and the host say so and the widget does not. A resize is
+noticed at the next key; a host that wants it sooner listens for `SIGWINCH`
+itself and wakes its loop, which is what `InputReader` and a channel of its
+own are for. The test suite runs this block, from this file, against an
+`IOBuffer`.
+
 ## What it does that a `readline` does not
 
 * **It is a function of state and a size.** `render(v, w, h)` returns `h` rows
