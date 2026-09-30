@@ -67,6 +67,17 @@ and a host that already reads keys - a multiplexer that has put every
 terminal's keys into one form, a GUI, a protocol of its own - produces the codes
 itself and takes none of what follows. A host that has nothing composes these.
 
+* **`enter_terminal(in, out; altscreen, title, mouse, paste)`** puts the
+  terminal in raw mode with the cursor hidden, and each of the keywords on
+  where it is asked for - the alternate screen and a saved title are for a
+  host that has the whole screen, and an inline one leaves them off. It
+  returns a `HeldTerminal`, which says what was done: `leave_terminal(t)`, in
+  the host's own `finally`, undoes exactly that and never throws, since the
+  commonest way out of a loop is a terminal that has already gone away; and
+  `suspend(f, t)` hands exactly that back to `$EDITOR` and takes it again.
+  `displaysize(t)` and `write(t, x)` are its output's, `readevent(t)` its
+  input's, and anything that is not a tty - an `IOBuffer`, in a test - is
+  taken as it is.
 * **`readevent(io)`** reads one event from a terminal in raw mode: a
   `KeyEvent` whose `code` is what `handle!` takes, a `PasteEvent` whose `text`
   is what `paste!` takes, a `MouseEvent` whose `kind`, `x` and `y` are what
@@ -290,7 +301,8 @@ their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
 `TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
 mouse and bracketed paste, the measuring (`awidth`, `astrip`, `afit`, `apad`,
 `amid`, `awrap`), `markdown_rows`, the key vocabulary, and what reads it from a
-terminal: the events, `readevent` and `scheme_reports`. A host that has a
+terminal: the events, `readevent`, `scheme_reports`, `enter_terminal` and
+`leave_terminal`. A host that has a
 `KeyEvent` of its own imports what it wants by name instead of `using`.
 
 Public and not exported is the rest of the API, which is either a name a host
@@ -310,6 +322,8 @@ is likely to have already or one it uses once, where it sets a widget up:
 * `MarkdownStyle`, `MDRow`, `highlight` and `highlighted_lines`, which a host
   drawing markdown builds, reads, extends and borrows
 * `ACTIONS`, which is what `handle!` answers
+* `HeldTerminal`, what `enter_terminal` returns, whose `mouse` a host that
+  toggles the mouse sets
 * `BG_QUERY`, `SCHEME_REPORT` and `BG_REPORT`: the background question on its
   own, and the two reports as patterns, for a host that reads some of its input
   undecoded and takes a report out of it

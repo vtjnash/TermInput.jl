@@ -16,7 +16,7 @@ import TermInput: ESCAPE, settext!, curline, move!, newline!, insertblock!, past
     backspace!, deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
     kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
-    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT
+    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal
 import InteractiveUtils
 
 @testset "TermInput" begin
@@ -1031,6 +1031,69 @@ end
     end
     @test occursin("\e[?1049h", thrown)
 
+end
+
+@testset "a terminal entered is left as it was found" begin
+    # Anything but a tty is taken as it is, so the sequences can be read back.
+    out = IOBuffer()
+    t = enter_terminal(IOBuffer(), out; altscreen = true, title = true,
+                       mouse = true, paste = true)
+    @test t isa HeldTerminal && t.tty === nothing
+    s = String(take!(out))
+    @test startswith(s, "\e[?1049h\e[?25l\e[22;2t")
+    @test endswith(s, string(mouse_reporting(true), bracketed_paste(true)))
+    leave_terminal(t)
+    s = String(take!(out))
+    # The reverse, and everything that was put on is taken off.
+    @test startswith(s, mouse_reporting(false))
+    @test endswith(s, string(bracketed_paste(false), "\e[?25h\e[?1049l\e[23;2t"))
+
+    # Only what was asked for: an inline host keeps its screen and its title.
+    t = enter_terminal(IOBuffer(), out)
+    @test String(take!(out)) == "\e[?25l"
+    leave_terminal(t)
+    @test String(take!(out)) == "\e[?25h"
+
+    # A mouse turned off during the run is not turned off again on the way out.
+    t = enter_terminal(IOBuffer(), out; mouse = true)
+    write(t, mouse_reporting(false)); t.mouse = false
+    take!(out)
+    leave_terminal(t)
+    @test !occursin(mouse_reporting(false), String(take!(out)))
+
+    # A terminal that has gone away is left without a word: the commonest way
+    # out of a loop is that one, and an exception from its `finally` would
+    # replace whatever brought it there.
+    gone = IOBuffer()
+    t = enter_terminal(IOBuffer(), gone; altscreen = true, mouse = true, paste = true)
+    close(gone)
+    @test leave_terminal(t) === nothing
+
+    # The size and the writes are the output's, the events the input's.
+    t = enter_terminal(IOBuffer("\e[Zq"), out)
+    @test displaysize(t) == displaysize(out)
+    write(t, "x")
+    @test endswith(String(take!(out)), "x")
+    @test readevent(t) == KeyEvent(K_STAB) && readevent(t) == KeyEvent(Int('q'))
+
+    # `suspend` undoes and redoes what was done and no more: no alternate
+    # screen that was never entered, and the mouse as it is now.
+    t = enter_terminal(IOBuffer(), out; paste = true)
+    take!(out)
+    ran = Ref(false)
+    suspend(() -> ran[] = true, t)
+    s = String(take!(out))
+    @test ran[]
+    @test s == string(bracketed_paste(false), "\e[?25h", "\e[?25l", bracketed_paste(true))
+    t = enter_terminal(IOBuffer(), out; altscreen = true, mouse = true)
+    take!(out)
+    try
+        suspend(() -> error("boom"), t)
+    catch
+    end
+    s = String(take!(out))
+    @test findfirst("\e[?1049l", s) < findfirst("\e[?1049h", s)
+    @test endswith(s, mouse_reporting(true))          # put back, thrown or not
 end
 
 @testset "the editor a widget hands the buffer to" begin

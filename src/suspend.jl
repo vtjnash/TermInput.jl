@@ -46,6 +46,11 @@ terminal that looks untouched and its own scrollback. `mouse` and `paste` say
 whether the host had mouse reporting and bracketed paste on, since only it
 knows - and a shell that never asked for the brackets would read them as keys.
 
+A host that entered with [`enter_terminal`](@ref) passes the `HeldTerminal` it
+returned instead, and what is undone and redone is what was done - see
+[`suspend(f, t::HeldTerminal)`](@ref suspend). This form is for a host that set
+the terminal up itself.
+
 `term` is a `REPL.Terminals.TTYTerminal`, or `nothing` where there is no
 terminal to hand over - a test, or a program whose output is a pipe. Everything
 else still happens, which is what makes the escape sequences assertable without

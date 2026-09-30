@@ -25,8 +25,9 @@ the program you are writing - so `render` is a pure function of the widget and a
 size, and `handle!` takes one key code.
 
 What a loop needs around the widgets is here as well, for a host that has none
-of it yet: `readevent` turns a terminal's bytes into keys, pastes and mouse
-reports. Each helper is usable alone and none of them owns the loop - what a key
+of it yet: `enter_terminal` and `leave_terminal` put the terminal into raw
+mode and the rest and back, and `readevent` turns its bytes into keys, pastes
+and mouse reports. Each helper is usable alone and none of them owns the loop - what a key
 means, when to draw and what else wakes it stay the host's - and a host that
 already has a decoder takes none of them.
 
@@ -46,6 +47,8 @@ embeds one.
                    with no view attached
   * `border.jl`    the box: its characters, and the weights it is painted in
   * `suspend.jl`   handing the terminal to `\$EDITOR` and taking it back
+  * `terminal.jl`  `enter_terminal` and `leave_terminal`: the modes a loop
+                   needs, set and undone
   * `textarea.jl`  `TextArea`, the multi-line composer
   * `lineinput.jl` `LineInput`, one line in a box
   * `choice.jl`    `Choice`, one of a list narrowed by typing, and `Confirm`,
@@ -74,6 +77,7 @@ export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer
        listwindow, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
 export markdown_rows
 export KeyEvent, PasteEvent, MouseEvent, SchemeEvent, readevent, scheme_reports
+export enter_terminal, leave_terminal
 # The key vocabulary is `readevent`'s or a host's to produce and every widget's
 # to bind, so it is re-exported rather than left behind the submodule: a program
 # that reads a keystroke has to be able to say `K_LEFT` without knowing where it
@@ -97,7 +101,7 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
         DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, highlighted_lines,
-        BG_QUERY, SCHEME_REPORT, BG_REPORT"""))
+        BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal"""))
 end
 
 include("ansi.jl")
@@ -108,6 +112,7 @@ include("events.jl")
 include("buffer.jl")
 include("border.jl")
 include("suspend.jl")
+include("terminal.jl")
 include("textarea.jl")
 include("lineinput.jl")
 include("choice.jl")
