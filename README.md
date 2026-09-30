@@ -148,6 +148,54 @@ Two-key chords are the reason several of those are skipped rather than absent:
 nothing here holds state between keystrokes, so `^x`-anything would be the first
 thing to need it.
 
+## Markdown, as rows
+
+`markdown_rows` draws a parsed `Markdown.MD` the way a widget is drawn: rows of
+exactly `w` display columns, and nothing else. It is here because a comment in
+a terminal program is a paragraph somebody wrote, drawn beside everything else
+on the screen, and the rows have to fit that screen the way a text area does.
+
+```julia
+using TermInput, Markdown
+import TermInput: MarkdownStyle
+
+md = Markdown.parse(body)                      # the host parses
+rs = markdown_rows(md, 80; style = MarkdownStyle(bold = ("\e[1m", "\e[22m")),
+                   breaks = true)
+rs[i].text     # the row: exactly 80 columns, escapes inline
+rs[i].src      # the written line it came from, unstyled - what a copy yields
+rs[i].first    # whether this row starts that line
+```
+
+* **The host parses.** A flavor is about where the markdown came from - GitHub's
+  tables, its intraword underscores - and not about the terminal, so the
+  renderer takes an ordinary tree.
+* **Every row knows its line.** A paragraph wrapped over three rows is one
+  `src`, with `first` on the first, so copying rows back out gives the lines as
+  they were written, not as they were wrapped.
+* **Styles are pairs, passed in.** `MarkdownStyle` is one `(on, off)` pair per
+  thing that is styled - headings by level, emphasis, code spans and blocks,
+  links, quotes, admonitions by category, tables, rules - all empty by default,
+  which draws with no escapes at all. Each piece of a row is closed behind
+  itself, so a code span that wraps is closed at the end of one row and opened
+  on the next, and the padding is never painted.
+* **`breaks = true`** makes a newline inside a paragraph a line break, as
+  GitHub draws a comment, rather than a space, as a document is read. Julia's
+  `Markdown` keeps the newline from 1.14; before that there is none to act on.
+* **Tables fit.** A table is drawn in `style.box` at its indent - inside a list
+  or a quote too - as wide as its cells, and when that is too wide the widest
+  columns are narrowed first and their cells wrapped rather than cut.
+* **Links are labels.** Where a url goes - a footnote, an OSC 8 link, nowhere -
+  is the host's.
+* **Anything unknown is its text.** An element a later Julia adds, or one an
+  older one lacks, is drawn as `Markdown.plain` draws it, unstyled: a version
+  skew costs styling and never text.
+
+A code block is highlighted where its language has a highlighter:
+`highlight(lang, code)` answers byte ranges and the face each is in, and
+`style.faces` says how each face is drawn. The method here is a stub for every
+language; a host that wants one adds a method for its own `lang`.
+
 ## The box, and the measuring
 
 The border is drawn from `BOXES`, this package's own table of box characters -
@@ -192,7 +240,7 @@ specific enough that it is unlikely to have them already: the four widgets and
 their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
 `TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
 mouse and bracketed paste, the measuring (`awidth`, `astrip`, `afit`, `apad`,
-`amid`, `awrap`), and the key vocabulary.
+`amid`, `awrap`), `markdown_rows`, and the key vocabulary.
 
 Public and not exported is the rest of the API, which is either a name a host
 is likely to have already or one it uses once, where it sets a widget up:
@@ -208,6 +256,8 @@ is likely to have already or one it uses once, where it sets a widget up:
   what a host drawing a field or a list of its own shares with the widgets:
   `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
   `ESCAPE`
+* `MarkdownStyle`, `MDRow` and `highlight`, which a host drawing markdown
+  builds, reads and extends
 * `ACTIONS`, which is what `handle!` answers
 
 ```julia

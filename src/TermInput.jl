@@ -42,6 +42,8 @@ embeds one.
   * `lineinput.jl` `LineInput`, one line in a box
   * `choice.jl`    `Choice`, one of a list narrowed by typing, and `Confirm`,
                    a question only named keys answer
+  * `markdown.jl`  `markdown_rows`: a parsed `Markdown.MD` as rows of exactly
+                   `w` columns, each knowing the line it came from
 
 ## What it measures with
 
@@ -53,6 +55,7 @@ module TermInput
 
 import REPL
 import InteractiveUtils
+import Markdown
 
 # Exported: what a host driving a widget writes on every call, with names
 # specific enough that it is unlikely to have them already.
@@ -61,6 +64,7 @@ export TextBuffer
 export suspend, compose_external, mouse_reporting, bracketed_paste
 export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer,
        listwindow, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
+export markdown_rows
 # The key vocabulary is a host's to produce and every widget's to bind, so it is
 # re-exported rather than left behind the submodule: a program that reads a
 # keystroke has to be able to say `K_LEFT` without knowing where it lives.
@@ -82,7 +86,7 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         newline!, insertblock!, backspace!, deletechar!, killline!,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
-        DIALOG_WIDTH"""))
+        DIALOG_WIDTH, MDRow, MarkdownStyle, highlight"""))
 end
 
 include("ansi.jl")
@@ -95,6 +99,7 @@ include("suspend.jl")
 include("textarea.jl")
 include("lineinput.jl")
 include("choice.jl")
+include("markdown.jl")
 
 """
     render(widget, w, h) -> String

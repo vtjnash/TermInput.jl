@@ -54,21 +54,21 @@ rs[i].src      # the written line it came from, unstyled - what a copy yields
 rs[i].first    # whether this row starts that line
 ```
 
-- [ ] **`markdown_rows(md::Markdown.MD, w; style, breaks) -> Vector{MDRow}`**,
+- [x] **`markdown_rows(md::Markdown.MD, w; style, breaks) -> Vector{MDRow}`**,
       in `src/markdown.jl`, exported. The name is specific enough to export
       under the package's own rule. Rows, not a joined string: every host
       splits one straight back, and the source map is per row.
-- [ ] **`MDRow(text, src, first)`**, public. `src` and `first` together are
+- [x] **`MDRow(text, src, first)`**, public. `src` and `first` together are
       what `unwrap_map` produces today, so the host's copy path keeps working
       by construction.
-- [ ] **`MarkdownStyle`**, public: a struct of escape pairs, one field per
+- [x] **`MarkdownStyle`**, public: a struct of escape pairs, one field per
       thing that is styled (below), empty by default. Passed in, not held in
       a `Ref`, so a render depends on nothing but its arguments. An empty
       field writes nothing, which is what `plain_term` does today. `CHROME[]`
       is the precedent for a global, and this does not follow it: the host
       has a theme already, and building one struct from it on each theme
       change is cheaper than a second global to keep in step.
-- [ ] **`breaks::Bool = false`**: a newline inside a paragraph's text is a
+- [x] **`breaks::Bool = false`**: a newline inside a paragraph's text is a
       line break, as GitHub draws a comment, rather than a space, as a
       document is read. Julia's `Markdown` keeps the newline in the text since
       1.14; before that the text has none, so the keyword has nothing to act
@@ -94,6 +94,32 @@ render goes away.
 
 Widths are `awidth`, which is display columns and treats a grapheme as one
 unit, never `length` or a count of `Char`s.
+
+### Decided while building it
+
+- **Runs are wrapped here, not with `awrap`.** `awrap` carries the codes in
+  force across a break but does not close them at the end of a row - so a code
+  span's background ran into the padding - and it cannot say which piece of a
+  row was which run. `wraprun` is the same greedy break at the last space, a
+  word wider than the row split by columns, graphemes kept whole; and each
+  piece of a row is written with its own styles and closed behind itself, so
+  nothing is in force at the end of a row and nothing is carried to the next.
+- **The highlighter's faces are `faces`, not `code`**: `code` is the inline
+  span's style, and one name cannot be both.
+- **`blockquote`, not `quote`**, which is a keyword.
+- **The table's box is `style.box`**, not `boxstyle()`: a render depends on
+  nothing but its arguments, and `wl` names a table's box (`tb_box`) apart
+  from the dialogs' (`box`).
+- **`loose` is believed only when an item has more than one block.** The
+  stdlib marks a list loose whenever a blank line follows it, which is every
+  list with a paragraph after it; GitHub draws that list tight.
+- **A table has a rule between body rows only when a cell wrapped**, which is
+  when the rows need telling apart; otherwise only under the header.
+- **`src` carries the prefix the line starts behind** - `• `, `│ `, the
+  indent - since that is what the row shows and what the wide render gave
+  before; a table row's `src` is its cells between pipes, a rule's is empty.
+- The `highlight` stub and the face fallbacks landed with the renderer
+  (step 2), since the code block calls them; step 4 is the extension alone.
 
 ## Every element, and what it becomes
 
@@ -121,12 +147,12 @@ styling and never text.
 | `Footnote` | the reference as `[^n]` in `footnote`; a definition as a paragraph led by it |
 | `HTMLBlock`, `HTMLInline` | the source, in `html` - GitHub sanitises most of it away, and the terminal cannot do better than show what was written |
 
-- [ ] The renderer, one method per element, dispatching on the element's
+- [x] The renderer, one method per element, dispatching on the element's
       type. The tree's content vectors are `Vector{Any}`, so that dispatch
       is dynamic whichever way it is written; `TRIM.md` has `wl` far enough
       from `--trim=safe` that this is not what to optimise for, and an
       `isa` chain would be the change if it ever is.
-- [ ] The box characters come from TermInput's own table (the step below),
+- [x] The box characters come from TermInput's own table (the step below),
       `boxstyle()` for the table's box.
 
 ## Highlighting: Julia on 1.12 and later, a stub otherwise
@@ -185,7 +211,7 @@ styling and never text.
        field of `CHROME`, so a host sets it beside the weights;
        `boxstyle(name)` looks one up and falls back to `ROUNDED`. A host
        that assigns `CHROME[]` gives all five fields now.
-2. [ ] **`src/markdown.jl`**: `markdown_rows`, `MDRow`, `MarkdownStyle`, the
+2. [x] **`src/markdown.jl`**: `markdown_rows`, `MDRow`, `MarkdownStyle`, the
        elements above.
 3. [ ] **Tests, with no tty**: one per element, per nesting (a table in a
        list, a code span split across a wrap, a list in a quote), the source
