@@ -84,6 +84,12 @@ end
     @test all(awidth(l) <= 14 for l in st)
     @test count(l -> occursin("\e[32m", l), st) == 1
     @test startswith(st[2], "\e[31m")          # the colour resumes on line two
+    # ...and ends where line one does, so padding the row paints nothing: a
+    # background open at a break is closed at the break, on every row it spans.
+    bg = awrap("aa \e[41mbbb ccc\e[49m dd", 6)
+    @test bg == ["aa ", "\e[41mbbb \e[0m", "\e[41mccc\e[49m dd"]
+    @test endswith(apad(bg[2], 8), "\e[0m    ")
+    @test awrap("\e[41m" * "x"^10, 4) == ["\e[41mxxxx\e[0m", "\e[41mxxxx\e[0m", "\e[41mxx"]
     for (s, w) in (("\e[32mgreen words that go on and on and on\e[0m", 12),
                    ("plain \e[1mbold\e[0m and \e[31mred\e[0m again", 10))
         @test ok(s, w) && same(s, w)

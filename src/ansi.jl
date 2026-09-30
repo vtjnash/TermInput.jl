@@ -168,8 +168,11 @@ Wrap to `w` display columns, preserving escapes and breaking at spaces.
 
 Two things make this more than a chunking loop.
 
-Style carries across a break: the active SGR codes are replayed at the start of
-each continuation line, or a colour opened before the break would stop at it.
+Style carries across a break: a row that ends with a colour in force ends it
+with a reset, and the codes are replayed at the start of the next, or a colour
+opened before the break would stop at it - and one left open at the end of the
+row would run on into whatever a host pads the row with. Only a break is closed
+this way; the last row ends as the text itself does.
 Escapes travel with the word they style, so that a word carried to the next line
 takes its colour with it.
 
@@ -252,9 +255,12 @@ which a row then draws, and a frame that promised `h` rows is one longer."""
 awraplines(s::AbstractString, w::Int) = String[l for p in split(s, '\n') for l in awrap(p, w)]
 
 """End the row `line` holds, and start the next under `codes` and the link `lk`:
-closed at the break and reopened after it, so each row's link is a row's worth."""
+both closed at the break and reopened after it, so each row's link is a row's
+worth and nothing styled is still in force where the row ends - a background
+left open there would paint whatever a host pads the row with."""
 function emit!(out::Vector{String}, line::IOBuffer, codes::Vector{String}, lk::String)
     isempty(lk) || write(line, LINK_OFF)
+    isempty(codes) || write(line, "\e[0m")
     push!(out, String(take!(line)))
     isempty(codes) || write(line, join(codes))
     isempty(lk) || write(line, lk)
