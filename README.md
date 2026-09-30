@@ -187,6 +187,15 @@ rs[i].first    # whether this row starts that line
   columns are narrowed first and their cells wrapped rather than cut.
 * **Links are labels.** Where a url goes - a footnote, an OSC 8 link, nowhere -
   is the host's.
+* **Where the stdlib's tree is wrong, the renderer reads around it.** A list
+  is marked loose whenever a blank line follows it, so `loose` is believed
+  only when an item has more than one block; two spaces ending a line stay in
+  the text, and are read as the break CommonMark says they are.
+* **A row's `src` is what the row shows.** A list item's line starts behind
+  its `• `, a quote's behind its `│ `, and that is in the `src`; a table row's
+  is its cells between pipes, and a rule's is empty. A table has a rule
+  between body rows only when a cell wrapped, which is when they need telling
+  apart.
 * **Anything unknown is its text.** An element a later Julia adds, or one an
   older one lacks, is drawn as `Markdown.plain` draws it, unstyled: a version
   skew costs styling and never text.
