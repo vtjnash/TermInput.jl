@@ -1117,10 +1117,6 @@ end
     # The channel is the host's, and its own wakes go on it beside the keys.
     put!(events, :wake)
     @test take!(events) === :wake
-    # A read of the host's own for one event, undecoded.
-    write(p.in, "\e[A")
-    arm!(r, readavailable)
-    @test take!(events) == Vector{UInt8}("\e[A")
     # The terminal gone is an event, not a loop left waiting for ever.
     close(p.in)
     arm!(r)
@@ -1128,6 +1124,26 @@ end
     @test ev isa EndEvent && ev.why isa EOFError
     wait(r.task)
     @test istaskdone(r.task) && !isready(events)
+
+    # A read of the host's own, told at each arming which way to read: here
+    # undecoded for one event and decoded for the next, in that order.
+    p = Pipe()
+    Base.link_pipe!(p; reader_supports_async = true, writer_supports_async = true)
+    r = InputReader(p.out, events, Bool) do io, raw
+        raw ? readavailable(io) : readevent(io)
+    end
+    write(p.in, "\e[A")
+    arm!(r, true)
+    @test take!(events) == Vector{UInt8}("\e[A")
+    write(p.in, "\e[A")
+    arm!(r, false)
+    @test take!(events) == KeyEvent(K_UP)
+    # Its type is what the host sends it, and only an argument of that type
+    # arms it; what it reads with, and from, is the task's alone.
+    @test r isa InputReader{Bool} && isconcretetype(typeof(r))
+    @test_throws MethodError arm!(r)
+    close(r)
+    close(p.in)
 
     # Let go while parked: it ends, and says nothing more.
     q = Pipe()

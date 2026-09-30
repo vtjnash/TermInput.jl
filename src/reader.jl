@@ -33,10 +33,11 @@ EndEvent() = EndEvent(nothing)
 
 """
     InputReader(in, events::Channel)
-    InputReader(t::HeldTerminal, events::Channel)
+    InputReader(read, in, events::Channel, T::Type)
 
 A task that reads one event from `in` each time it is armed ([`arm!`](@ref)),
-puts it on `events`, and is parked until it is armed again.
+puts it on `events`, and is parked until it is armed again. `in` may be a
+[`HeldTerminal`](@ref), for its input.
 
 The channel is the host's, so whatever else wakes its loop - a background job
 landing, a timer, a resize - goes on the same one, and the loop waits in one
@@ -48,64 +49,80 @@ Parked is what makes [`suspend`](@ref) safe: between an event and the next
 key. A host arms it once it has finished with the event before - which is
 where a key that opens `\$EDITOR` is handled - and not twice for one event.
 
+The first form reads with [`readevent`](@ref). The second reads with
+`read(in, arg)`, where `arg::T` is what each `arm!` was given: for a host that
+reads some of its input another way - undecoded, to pass on to a program it
+runs - and decides which way for each event, when it arms the reader and knows
+what is in front of it, rather than in the reader, which is parked between
+events and would be deciding against whatever was there last time. `read`, `in`
+and `events` are the task's alone and only `arg` is sent, so the reader's type
+is `InputReader{T}` and the task is compiled for what it was given.
+
+    r = InputReader(term, events, Bool) do io, raw
+        raw ? readraw(io) : readevent(io)
+    end
+    arm!(r, forwarding)
+
 `close(r)` lets it go: a reader that is parked ends there, and one that is
 reading ends when its read does, and puts nothing more on `events` either way.
 """
-mutable struct InputReader
-    in::IO
-    events::Channel
-    ready::Channel{Any}          # host -> reader: read one event, with this
+mutable struct InputReader{T}
+    ready::Channel{T}            # host -> reader: read one event, with this
     task::Union{Nothing,Task}
     closed::Bool
 end
 
-function InputReader(in::IO, events::Channel)
-    r = InputReader(in, events, Channel{Any}(1), nothing, false)
-    r.task = @async begin
-        while true
-            readone = try
-                take!(r.ready)
-            catch
-                break                       # closed: nobody wants more
-            end
-            ev = try
-                readone(r.in)
-            catch e
-                # EOF because the terminal closed, EIO because the pty is gone.
-                # The loop is waiting on its channel and nothing else is
-                # coming, so it is told - unless it has already let go.
-                r.closed || try
-                    put!(r.events, EndEvent(e))
-                catch
-                end
-                break
-            end
-            r.closed && break
-            try
-                put!(r.events, ev)
-            catch
-                break
-            end
-        end
-    end
+function InputReader(read, in::IO, events::Channel, ::Type{T}) where {T}
+    r = InputReader{T}(Channel{T}(1), nothing, false)
+    r.task = @async readloop(r, read, in, events)
     r
 end
-InputReader(t::HeldTerminal, events::Channel) = InputReader(t.in, events)
+InputReader(read, t::HeldTerminal, events::Channel, ::Type{T}) where {T} =
+    InputReader(read, t.in, events, T)
+InputReader(in, events::Channel) = InputReader(readkeys, in, events, Nothing)
+
+readkeys(io::IO, ::Nothing) = readevent(io)
+
+# The task's body, and a function so that it is compiled for the read, the
+# stream and the channel it was handed, which nothing outside it ever sees.
+function readloop(r::InputReader, read, in::IO, events::Channel)
+    while true
+        arg = try
+            take!(r.ready)
+        catch
+            break                           # closed: nobody wants more
+        end
+        ev = try
+            read(in, arg)
+        catch e
+            # EOF because the terminal closed, EIO because the pty is gone.
+            # The loop is waiting on its channel and nothing else is coming,
+            # so it is told - unless it has already let go.
+            r.closed || try
+                put!(events, EndEvent(e))
+            catch
+            end
+            break
+        end
+        r.closed && break
+        try
+            put!(events, ev)
+        catch
+            break
+        end
+    end
+end
 
 """
-    arm!(r::InputReader, read = readevent)
+    arm!(r::InputReader)
+    arm!(r::InputReader, arg)
 
-Let `r` read one event, with `read(in)` - [`readevent`](@ref), or a host's own
-for a stretch of input it wants some other way, undecoded to pass on to a
-program it runs, say. Which one is decided here, by the loop, where it knows
-what is in front of it, and not by the reader, which is parked between events.
-
-`read` is called in the world the reader's task was started in, so it has to
-be a method that existed then: one defined later - a closure evaluated after
-the reader was made, a method added at a REPL - is the host's to reach, with
-`Base.Fix1(invokelatest, f)` if it wants that.
+Let `r` read one event: with [`readevent`](@ref), or with the `read` it was made
+with, handed `arg` - which is how the loop says, for this event, which way to
+read it.
 """
-arm!(r::InputReader, read = readevent) = (put!(r.ready, read); r)
+arm!(r::InputReader{Nothing}) = arm!(r, nothing)
+arm!(r::InputReader{T}, arg::T) where {T} = (put!(r.ready, arg); r)
 
 function Base.close(r::InputReader)
     r.closed = true

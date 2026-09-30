@@ -93,13 +93,18 @@ itself and takes none of what follows. A host that has nothing composes these.
   that wants one writes its own reader and keeps everything else, which is
   why nothing here owns the loop.
 * **`InputReader(t, events)`** is a task that reads one event each time it is
-  armed - `arm!(r)`, or `arm!(r, read)` with a read of the host's own - and puts
-  it on `events`, a `Channel` the host owns, so that whatever else wakes the
+  armed - `arm!(r)` - and puts it on `events`, a `Channel` the host owns, so that whatever else wakes the
   loop goes on the same channel and the loop waits in one place. Between an
   event and the next `arm!` nothing is reading the terminal, which is what
   makes `suspend` safe: a reader always in `read` would race `$EDITOR` for
   every key. When input ends it puts an `EndEvent`, whose `why` is the error,
-  rather than leaving the loop waiting for ever; `close(r)` lets it go.
+  rather than leaving the loop waiting for ever; `close(r)` lets it go. A host
+  that reads some input another way - undecoded, to pass on - makes it with
+  its own `read(io, arg)` and an argument type,
+  `InputReader(read, t, events, Bool)`, and says at each `arm!(r, arg)` which
+  way the next event is read. The function and the stream are the task's
+  alone and only the argument is sent, so the reader is an
+  `InputReader{Bool}` and nothing is passed through a channel but a `Bool`.
 * **`frame_bytes(frame, title, cursor)`** is a full-screen frame as one write:
   inside a synchronized-output hold, the cursor hidden first and shown last
   where the host puts it, and each row's line deleted and written again, never
