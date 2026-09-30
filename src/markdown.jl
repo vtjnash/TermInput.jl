@@ -149,30 +149,37 @@ end
 
 const Line = Vector{Run}
 
-"The escapes and text of one piece, closed behind itself."
-function writerun(io::IO, r::Run)
-    for s in r.styles
-        write(io, s[1])
-    end
-    write(io, r.text)
-    for k in length(r.styles):-1:1
-        write(io, r.styles[k][2])
-    end
-    nothing
-end
+"""A row of runs as the string that prints it.
 
-"""A row of runs as the string that prints it. Neighbours in the same styles
-are written as one piece, so a word of plain text is not a dozen resets."""
+A style two neighbours share stays open across both: only the styles that
+differ are closed and opened, so a code span is one background with its
+backticks dimmed inside it, not three. An end that is also the end of a style
+still open - `\e[22m` ends bold and dim alike - would take that one with it,
+so it is opened again after. Nothing is open at the end of the row."""
 function emit(line::Line)
     io = IOBuffer()
-    k = 1
-    while k <= length(line)
-        j = k
-        while j < length(line) && line[j+1].styles == line[k].styles
-            j += 1
+    open = MDStyle[]
+    for r in line
+        isempty(r.text) && continue
+        k = 0                                   # how much of `open` is shared
+        while k < min(length(open), length(r.styles)) && open[k+1] == r.styles[k+1]
+            k += 1
         end
-        writerun(io, j == k ? line[k] : Run(join(line[i].text for i in k:j), line[k].styles))
-        k = j + 1
+        closing = open[k+1:end]
+        for c in Iterators.reverse(closing)
+            write(io, c[2])
+        end
+        for s in open[1:k]
+            any(c -> c[2] == s[2] && !isempty(s[2]), closing) && write(io, s[1])
+        end
+        for s in r.styles[k+1:end]
+            write(io, s[1])
+        end
+        write(io, r.text)
+        open = r.styles
+    end
+    for c in Iterators.reverse(open)
+        write(io, c[2])
     end
     String(take!(io))
 end

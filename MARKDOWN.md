@@ -104,6 +104,10 @@ unit, never `length` or a count of `Char`s.
   word wider than the row split by columns, graphemes kept whole; and each
   piece of a row is written with its own styles and closed behind itself, so
   nothing is in force at the end of a row and nothing is carried to the next.
+- **A style two neighbours share stays open across both** (`emit`): a code
+  span is one background with its backticks dimmed inside it, not three, and
+  an end that is also an open style's end (`22` for bold and dim alike) opens
+  that one again after it.
 - **The highlighter's faces are `faces`, not `code`**: `code` is the inline
   span's style, and one name cannot be both.
 - **`blockquote`, not `quote`**, which is a keyword.

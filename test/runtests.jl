@@ -1016,11 +1016,16 @@ end
         isdefined(Markdown, :Strikethrough) && @test occursin("\e[9md\e[29m", rs[1].text)
         # Nested as written: the inner style inside the outer.
         rs = drawn("**a *b* c**"; style = MarkdownStyle(bold = B, italic = I))
-        @test occursin("\e[1m\e[3mb\e[23m\e[22m", rs[1].text)
+        @test startswith(rs[1].text, "\e[1ma \e[3mb\e[23m c\e[22m ")
         # A code span keeps its backticks, in `code_tick` inside `code`.
         rs = drawn("x `y` z"; style = MarkdownStyle(code = BG, code_tick = D))
-        @test occursin("\e[48;5;236m\e[2m`\e[22m\e[49m\e[48;5;236my\e[49m", rs[1].text)
-        @test rs[1].src == "x `y` z"
+        # One background, the backticks dimmed inside it.
+        @test occursin("x \e[48;5;236m\e[2m`\e[22my\e[2m`\e[22m\e[49m z", rs[1].text)
+        # An end that ends an outer style too - `22` is bold's and dim's -
+        # opens the outer one again.
+        rs = drawn("**a `b` c**"; style = MarkdownStyle(bold = B, code_tick = D))
+        @test occursin("\e[1ma \e[2m`\e[22m\e[1mb\e[2m`\e[22m\e[1m c\e[22m", rs[1].text)
+        @test rs[1].src == "a `b` c"
         # Julia reads a double backtick as maths, so the span is built by hand.
         rs = markdown_rows(Markdown.MD(Any[Markdown.Paragraph(Any[Markdown.Code("", "a`b")])]), 10)
         @test texts(rs) == ["``a`b``"]
