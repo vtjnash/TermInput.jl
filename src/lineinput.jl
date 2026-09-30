@@ -84,10 +84,14 @@ text(v::LineInput) = text(v.buf)
 """
     paste!(v::LineInput, s) -> LineInput
 
-A paste, as one line: the line breaks inside it become spaces and the one
-it ends on - a copied line nearly always carries it - goes."""
+A paste, as one line: the line breaks inside it become spaces, the one it
+ends on - a copied line nearly always carries it - goes, and nothing that is
+not a character is kept. A tab too, which a `TextArea` keeps: in one row of a
+field it is a jump of columns the field does not draw, and nothing a question
+on one line is asking for.
+"""
 paste!(v::LineInput, s::AbstractString) =
-    (paste!(v.buf, oneline(rstrip(String(s), ('\r', '\n')))); v)
+    (paste!(v.buf, filter(!iscntrl, oneline(rstrip(String(s), ('\r', '\n'))))); v)
 isblank(v::LineInput) = isblank(v.buf)
 
 """

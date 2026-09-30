@@ -527,6 +527,15 @@ end
     @test text(li) == "https://x/y"
     TermInput.paste!(li, " a\r\nb")
     @test text(li) == "https://x/y a b"
+    # And only characters: a tab, which a text area keeps, is a jump the one
+    # row does not draw, and an escape is a command to the terminal.
+    li = LineInput("t")
+    TermInput.paste!(li, "a\tb\e[31mc\x7f\n")
+    @test text(li) == "ab[31mc"
+    # A picker's query is one.
+    c = Choice("t", "", ["ab", "cd"])
+    TermInput.paste!(c, "a\tb\n")
+    @test query(c) == "ab" && matches(c) == [1]
     ta = TextArea("t"; initial = "x")
     TermInput.paste!(ta, "\ny")
     @test text(ta) == "x\ny"

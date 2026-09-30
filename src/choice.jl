@@ -288,7 +288,8 @@ end
 """
     paste!(c::Choice, s) -> Choice
 
-A paste goes into the query, as one line.
+A paste goes into the query, as one line and characters only - see
+[`paste!(::LineInput, ::AbstractString)`](@ref).
 """
 paste!(c::Choice, s::AbstractString) = (paste!(c.input, s); c.sel = 1; c)
 
