@@ -27,8 +27,9 @@ size, and `handle!` takes one key code.
 What a loop needs around the widgets is here as well, for a host that has none
 of it yet: `enter_terminal` and `leave_terminal` put the terminal into raw
 mode and the rest and back, `readevent` turns its bytes into keys, pastes and
-mouse reports, and `InputReader` reads them from a task onto a channel the
-host's loop waits on. Each helper is usable alone and none of them owns the loop - what a key
+mouse reports, `InputReader` reads them from a task onto a channel the host's
+loop waits on, and `frame_bytes` writes a frame so that the terminal does not
+draw half of it. Each helper is usable alone and none of them owns the loop - what a key
 means, when to draw and what else wakes it stay the host's - and a host that
 already has a decoder takes none of them.
 
@@ -52,6 +53,8 @@ embeds one.
                    needs, set and undone
   * `reader.jl`    `InputReader`: a task reading one event each time it is
                    armed, onto a channel the host's loop waits on
+  * `frame.jl`     `frame_bytes`, a frame as one write, and `input_waiting`,
+                   when not to write one
   * `textarea.jl`  `TextArea`, the multi-line composer
   * `lineinput.jl` `LineInput`, one line in a box
   * `choice.jl`    `Choice`, one of a list narrowed by typing, and `Confirm`,
@@ -80,7 +83,8 @@ export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer
        listwindow, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
 export markdown_rows
 export KeyEvent, PasteEvent, MouseEvent, SchemeEvent, readevent, scheme_reports
-export enter_terminal, leave_terminal, InputReader, arm!, EndEvent
+export enter_terminal, leave_terminal, InputReader, arm!, EndEvent, frame_bytes,
+       input_waiting
 # The key vocabulary is `readevent`'s or a host's to produce and every widget's
 # to bind, so it is re-exported rather than left behind the submodule: a program
 # that reads a keystroke has to be able to say `K_LEFT` without knowing where it
@@ -117,6 +121,7 @@ include("border.jl")
 include("suspend.jl")
 include("terminal.jl")
 include("reader.jl")
+include("frame.jl")
 include("textarea.jl")
 include("lineinput.jl")
 include("choice.jl")

@@ -1146,6 +1146,39 @@ end
     @test take!(events) isa EndEvent                  # an IOBuffer ends too
 end
 
+@testset "a frame is one write, cursor hidden first and shown last" begin
+    b = String(frame_bytes("ab\ncd", "", (2, 1)))
+    # Held by the terminal until the closing sequence, drawn with the cursor
+    # hidden, and the cursor put where the host said and shown only then.
+    @test startswith(b, "\e[?2026h\e[?25l\e[1;1r")
+    @test endswith(b, "\e[r\e[2;1H\e[?25h\e[?2026l")
+    # Each row's line deleted before it is written, and only that line: the
+    # scroll region is the row. A line xterm.js deletes takes the markers of
+    # the links drawn on it; one overwritten or erased kept them all.
+    @test occursin("\e[1;1r\e[1H\e[Mab\e[2;2r\e[2H\e[Mcd\e[r", b)
+    @test !occursin("\e[K", b) && !occursin("\e[J", b) && !occursin('\n', b)
+    # No cursor to show: it stays hidden, and nothing moves it.
+    n = String(frame_bytes("ab"))
+    @test endswith(n, "\e[Mab\e[r\e[?2026l") && !occursin("?25h", n)
+    # The title goes after the frame and before the caret, inside the hold.
+    t = String(frame_bytes("x", "\e]2;a title\e\\", (1, 1)))
+    @test occursin("\e[r\e]2;a title\e\\\e[1;1H\e[?25h", t)
+    # Rows the frame did not bring, to the screen's height, are deleted too.
+    f = String(frame_bytes("ab", "", nothing; h = 3))
+    @test occursin("\e[Mab\e[2;2r\e[2H\e[M\e[3;3r\e[3H\e[M\e[r", f)
+end
+
+@testset "no frame while input is waiting" begin
+    # A burst is a key at a time with the rest already waiting, which is what
+    # holds the frame until the last of them; a key typed alone is not.
+    io = IOBuffer("hi\e[A")
+    @test readevent(io) == KeyEvent(Int('h')) && input_waiting(io)
+    readevent(io)
+    @test readevent(io) == KeyEvent(K_UP) && !input_waiting(io)
+    t = enter_terminal(IOBuffer("hi"), IOBuffer())
+    @test input_waiting(t)
+end
+
 @testset "the editor a widget hands the buffer to" begin
     # `⌥e` hands the buffer over and takes back whatever comes out. Nothing
     # here depends on an editor being installed: `define_editor` is the hook

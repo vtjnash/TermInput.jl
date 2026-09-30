@@ -96,6 +96,14 @@ itself and takes none of what follows. A host that has nothing composes these.
   makes `suspend` safe: a reader always in `read` would race `$EDITOR` for
   every key. When input ends it puts an `EndEvent`, whose `why` is the error,
   rather than leaving the loop waiting for ever; `close(r)` lets it go.
+* **`frame_bytes(frame, title, cursor)`** is a full-screen frame as one write:
+  inside a synchronized-output hold, the cursor hidden first and shown last
+  where the host puts it, and each row's line deleted and written again, never
+  overwritten or cleared - a terminal that keeps a hyperlink's marker until its
+  line is deleted (xterm.js) otherwise keeps every link it was ever shown.
+  **`input_waiting(t)`** says whether bytes already read are waiting behind the
+  event just taken; a host that skips the frame while they are draws a burst
+  once, at its end, and never waits to find out.
 * **`scheme_reports(on)`** asks the terminal to say whether it is dark or
   light, now and on every change, and what its background is, and
   `readevent` reads the answers as `SchemeEvent`s. What dark or light means to
@@ -310,7 +318,7 @@ their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
 mouse and bracketed paste, the measuring (`awidth`, `astrip`, `afit`, `apad`,
 `amid`, `awrap`), `markdown_rows`, the key vocabulary, and what reads it from a
 terminal: the events, `readevent`, `scheme_reports`, `enter_terminal`,
-`leave_terminal`, `InputReader` and `arm!`. A host that has a
+`leave_terminal`, `InputReader`, `arm!`, `frame_bytes` and `input_waiting`. A host that has a
 `KeyEvent` of its own imports what it wants by name instead of `using`.
 
 Public and not exported is the rest of the API, which is either a name a host
