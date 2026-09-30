@@ -1278,6 +1278,21 @@ end
     @test last(off) < first(findfirst("abcdef", wide)) &&
           first(on) > last(findfirst("gh", wide))
     @test occursin("abcdef\e[2;2r\e[2H\e[Mgh", wide)
+    # Rows of faces are written by StyledStrings, and a row as a string, or
+    # with no faces, as it is.
+    out(r) = sprint(print, r; context = :color => true)
+    bold = faced("ab", Face(weight = :bold))
+    fr = String(frame_bytes([bold, TermInput.row("cd"), "\e[1mef"]))
+    @test occursin(string("\e[1H\e[M", out(bold), "\e[2;2r"), fr)
+    @test occursin("\e[2H\e[Mcd\e[3;3r\e[3H\e[M\e[1mef\e[r", fr)
+    @test frame_bytes(["ab", "cd"], "", (2, 1)) == frame_bytes("ab\ncd", "", (2, 1))
+    # A verbatim piece is written as it is and closed, and what follows it is
+    # written from the column after its width, however little it drew.
+    v = rowcat("│", verbatim("\e[31mab", 5), faced("│", Face(weight = :bold)))
+    fv = String(frame_bytes([v]))
+    @test occursin(string("\e[M│\e[31mab\e[0m\e[7G", out(faced("│", Face(weight = :bold)))), fv)
+    two = rowcat(verbatim("x", 3), " ", verbatim("y", 2), "z")
+    @test occursin("\e[Mx\e[0m\e[4G y\e[0m\e[7Gz", String(frame_bytes([two])))
 end
 
 @testset "no frame while input is waiting" begin

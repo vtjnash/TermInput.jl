@@ -4,14 +4,28 @@
 # knows nothing about what is in them - every rule here is about a terminal.
 
 """
-    frame_bytes(frame, title = "", cursor = nothing; h = 0) -> Vector{UInt8}
+    frame_bytes(rows, title = "", cursor = nothing; h = 0) -> Vector{UInt8}
+    frame_bytes(frame::AbstractString, title = "", cursor = nothing; h = 0)
 
-One full-screen frame - `render`'s rows, joined by newlines - as the bytes the
+One full-screen frame - `render`'s rows, top to bottom - as the bytes the
 terminal is sent, in one write. `title` goes after the rows as it is (an
 `OSC 2` the host built, or `""`), and `cursor`, a 1-based `(row, col)`, is
 where the terminal's own cursor is put and shown; `nothing` leaves it hidden,
 for a frame that draws its own. `h` is the screen's height, and rows the frame
 did not bring, up to it, are cleared too; `0` is the frame's own.
+
+A row is a [`Row`](@ref), written by StyledStrings in its faces - whatever the
+stream, since what turns colour on is the faces a host put there, and a row
+with none writes no escape at all - or a `String`, written as it is. A frame as
+one string is its rows joined by newlines.
+
+A `:verbatim` piece of a row ([`verbatim`](@ref)) is written as it is, with a
+reset after it, since what it opened is its own and the row goes on; then the
+cursor is moved to the column after its width, and the rest of the row is
+written from there. Nothing measures what the piece drew: a program's row as
+its multiplexer gave it keeps its trailing spaces only up to the last cell
+written, and is narrower than its pane - which the row just deleted is already
+blank under.
 
 Three things about the write, none of them about what is in the frame:
 
@@ -59,18 +73,46 @@ Terminal.app keeps it *on* the last column, where an erase after a full row
 took the right border off every row. Nothing is erased after a row regardless,
 and each row starts by setting the scroll region, which homes the cursor.
 """
-function frame_bytes(frame::AbstractString, title::AbstractString = "",
+function frame_bytes(rows::AbstractVector{<:AbstractString}, title::AbstractString = "",
                      cur::Union{Nothing,Tuple{Int,Int}} = nothing; h::Int = 0)
     io = IOBuffer()
+    cio = IOContext(io, :color => true)
     print(io, "\e[?2026h\e[?25l\e[?7l")
-    rows = split(frame, '\n')
     for i in 1:max(h, length(rows))
-        print(io, "\e[", i, ";", i, "r\e[", i, "H\e[M", get(rows, i, ""))
+        print(io, "\e[", i, ";", i, "r\e[", i, "H\e[M")
+        i <= length(rows) && writerow(cio, rows[i])
     end
     print(io, "\e[r\e[?7h", title)
     cur === nothing || print(io, "\e[", cur[1], ";", cur[2], "H\e[?25h")
     print(io, "\e[?2026l")
     take!(io)
+end
+frame_bytes(frame::AbstractString, title::AbstractString = "",
+            cur::Union{Nothing,Tuple{Int,Int}} = nothing; h::Int = 0) =
+    frame_bytes(split(frame, '\n'), title, cur; h)
+
+"""One row onto a frame: its faces by StyledStrings, and each verbatim piece
+as it is, closed, with the cursor moved past its width."""
+writerow(io::IO, s::AbstractString) = (print(io, s); nothing)
+writerow(io::IO, s::SubString{<:AnnotatedString}) = writerow(io, row(s))
+function writerow(io::IO, s::AnnotatedString)
+    x = row(s)
+    vs = verbatims(x)
+    isempty(vs) && (print(io, x); return nothing)
+    str = x.string
+    col, i = 1, 1
+    for (r, vw) in vs
+        if first(r) > i
+            piece = slice(x, i, first(r) - 1)
+            print(io, piece); col += rowwidth(piece)
+        end
+        print(io, SubString(str, first(r), thisind(str, last(r))), "\e[0m")
+        col += vw
+        print(io, "\e[", col, "G")
+        i = last(r) + 1
+    end
+    i <= ncodeunits(str) && print(io, slice(x, i, ncodeunits(str)))
+    nothing
 end
 
 """

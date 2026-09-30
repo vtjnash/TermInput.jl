@@ -105,13 +105,16 @@ itself and takes none of what follows. A host that has nothing composes these.
   way the next event is read. The function and the stream are the task's
   alone and only the argument is sent, so the reader is an
   `InputReader{Bool}` and nothing is passed through a channel but a `Bool`.
-* **`frame_bytes(frame, title, cursor)`** is a full-screen frame as one write:
+* **`frame_bytes(rows, title, cursor)`** is a full-screen frame as one write:
   inside a synchronized-output hold, the cursor hidden first and shown last
   where the host puts it, and each row's line deleted and written again, never
   overwritten or cleared - a terminal that keeps a hyperlink's marker until its
   line is deleted (xterm.js) otherwise keeps every link it was ever shown.
   Auto-wrap is off while it is written, so a row wider than the screen is cut
-  at its edge rather than pushing the frame down a row.
+  at its edge rather than pushing the frame down a row. A row is a `Row`,
+  written by StyledStrings in its faces whatever the stream, or a `String`
+  written as it is; a `verbatim` piece of one is written untouched and closed,
+  and the cursor moved past its width for the rest of the row.
   **`input_waiting(t)`** says whether bytes already read are waiting behind the
   event just taken; a host that skips the frame while they are draws a burst
   once, at its end, and never waits to find out.
