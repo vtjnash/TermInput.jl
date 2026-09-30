@@ -47,22 +47,27 @@ that draws mid-frame shows that row blank and nothing else moved, which is all
 an erase ever showed; never a clear, which is a blank frame and a flicker on
 every key.
 
-And it answers the pending wrap for free. Writing the last column leaves the
-cursor in the pending-wrap state, and terminals disagree about where that is:
-xterm.js counts it past the last column, Terminal.app keeps it *on* the last
-column, where an erase after a full row took the right border off every row.
-Nothing is erased after a row, and the next row starts by setting the scroll
-region, which moves the cursor home wherever it was pending.
+**Auto-wrap is off while the frame is written** (DECAWM, `\\e[?7l`), and on
+again at its end, so a program run after it sees the terminal as it was. A
+row wider than the screen - one a measure got wrong, or a pane's between a
+resize and its program catching up - wraps onto the next line with it on, and
+pushes the rest of the frame down a row; with it off the terminal writes the
+extra over the last column and the frame stays where it is. With no wrap there
+is no pending wrap either, the state writing the last column leaves the cursor
+in and that terminals disagree about: xterm.js counts it past the last column,
+Terminal.app keeps it *on* the last column, where an erase after a full row
+took the right border off every row. Nothing is erased after a row regardless,
+and each row starts by setting the scroll region, which homes the cursor.
 """
 function frame_bytes(frame::AbstractString, title::AbstractString = "",
                      cur::Union{Nothing,Tuple{Int,Int}} = nothing; h::Int = 0)
     io = IOBuffer()
-    print(io, "\e[?2026h\e[?25l")
+    print(io, "\e[?2026h\e[?25l\e[?7l")
     rows = split(frame, '\n')
     for i in 1:max(h, length(rows))
         print(io, "\e[", i, ";", i, "r\e[", i, "H\e[M", get(rows, i, ""))
     end
-    print(io, "\e[r", title)
+    print(io, "\e[r\e[?7h", title)
     cur === nothing || print(io, "\e[", cur[1], ";", cur[2], "H\e[?25h")
     print(io, "\e[?2026l")
     take!(io)

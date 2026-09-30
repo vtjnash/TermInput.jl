@@ -1173,22 +1173,30 @@ end
     b = String(frame_bytes("ab\ncd", "", (2, 1)))
     # Held by the terminal until the closing sequence, drawn with the cursor
     # hidden, and the cursor put where the host said and shown only then.
-    @test startswith(b, "\e[?2026h\e[?25l\e[1;1r")
-    @test endswith(b, "\e[r\e[2;1H\e[?25h\e[?2026l")
+    @test startswith(b, "\e[?2026h\e[?25l\e[?7l\e[1;1r")
+    @test endswith(b, "\e[r\e[?7h\e[2;1H\e[?25h\e[?2026l")
     # Each row's line deleted before it is written, and only that line: the
     # scroll region is the row. A line xterm.js deletes takes the markers of
     # the links drawn on it; one overwritten or erased kept them all.
-    @test occursin("\e[1;1r\e[1H\e[Mab\e[2;2r\e[2H\e[Mcd\e[r", b)
+    @test occursin("\e[1;1r\e[1H\e[Mab\e[2;2r\e[2H\e[Mcd\e[r\e[?7h", b)
     @test !occursin("\e[K", b) && !occursin("\e[J", b) && !occursin('\n', b)
     # No cursor to show: it stays hidden, and nothing moves it.
     n = String(frame_bytes("ab"))
-    @test endswith(n, "\e[Mab\e[r\e[?2026l") && !occursin("?25h", n)
+    @test endswith(n, "\e[Mab\e[r\e[?7h\e[?2026l") && !occursin("?25h", n)
     # The title goes after the frame and before the caret, inside the hold.
     t = String(frame_bytes("x", "\e]2;a title\e\\", (1, 1)))
-    @test occursin("\e[r\e]2;a title\e\\\e[1;1H\e[?25h", t)
+    @test occursin("\e[r\e[?7h\e]2;a title\e\\\e[1;1H\e[?25h", t)
     # Rows the frame did not bring, to the screen's height, are deleted too.
     f = String(frame_bytes("ab", "", nothing; h = 3))
     @test occursin("\e[Mab\e[2;2r\e[2H\e[M\e[3;3r\e[3H\e[M\e[r", f)
+    # A row wider than the screen does not wrap onto the next: auto-wrap is
+    # off from before the first row to after the last, and on again after,
+    # and the next row is put at its own line whatever the cursor did.
+    wide = String(frame_bytes("abcdef\ngh"))
+    off, on = findfirst("\e[?7l", wide), findfirst("\e[?7h", wide)
+    @test last(off) < first(findfirst("abcdef", wide)) &&
+          first(on) > last(findfirst("gh", wide))
+    @test occursin("abcdef\e[2;2r\e[2H\e[Mgh", wide)
 end
 
 @testset "no frame while input is waiting" begin

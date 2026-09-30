@@ -110,6 +110,8 @@ itself and takes none of what follows. A host that has nothing composes these.
   where the host puts it, and each row's line deleted and written again, never
   overwritten or cleared - a terminal that keeps a hyperlink's marker until its
   line is deleted (xterm.js) otherwise keeps every link it was ever shown.
+  Auto-wrap is off while it is written, so a row wider than the screen is cut
+  at its edge rather than pushing the frame down a row.
   **`input_waiting(t)`** says whether bytes already read are waiting behind the
   event just taken; a host that skips the frame while they are draws a burst
   once, at its end, and never waits to find out.
