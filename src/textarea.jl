@@ -55,8 +55,9 @@ unreachable.
 Fields worth setting after construction: `status` is a line the footer shows
 instead of the key hints - a host's answer to what just happened, cleared by the
 next keystroke - and `hint` is those key hints, which a host has to add its own
-keys to, since the widget does not know what they are. `focused` is whether the
-cursor is drawn; see the constructor.
+keys to, since the widget does not know what they are. `focused` is whether it
+has the terminal's cursor or a block where the cursor would be; see the
+constructor.
 """
 mutable struct TextArea
     title::String
@@ -94,9 +95,11 @@ title.
   * `maxwidth` the widest the box is drawn, however wide the screen. Wider than
                [`DIALOG_WIDTH`](@ref), because this is somewhere to write a
                paragraph rather than a question to answer
-  * `focused`  whether the cursor is drawn: `false` while a host has the
-               keyboard somewhere else on the same screen, so that two things
-               drawn side by side do not both look as if they have it
+  * `focused`  whether it has the keyboard, and so the terminal's cursor -
+               see [`caret`](@ref). `false` while a host has the keys somewhere
+               else on the same screen: the widget then draws a block in
+               reverse video where its cursor is, which says where typing will
+               go when the keys come back without saying that they are here
 
 How the terminal is handed back while `\$EDITOR` runs is not the widget's: it is
 given with the key, to [`handle!`](@ref).
@@ -145,7 +148,10 @@ isblank(v::TextArea) = isblank(v.buf)
 
 # --- drawing ----------------------------------------------------------------
 
-function render(v::TextArea, w::Int, h::Int)
+render(v::TextArea, w::Int, h::Int) = first(framed(v, w, h))
+caret(v::TextArea, w::Int, h::Int) = last(framed(v, w, h))
+
+function framed(v::TextArea, w::Int, h::Int)
     b = dialogbox(w; width = v.maxwidth)
     bh = max(3, h - 8)                 # rows of text inside the box
     rows, crow, ccol = bufferrows(v.buf, b.iw)
@@ -159,27 +165,32 @@ function render(v::TextArea, w::Int, h::Int)
         push!(out, b.row(l, b.chrome.quiet))
     end
     push!(out, b.row(""))
+    k = 0
     for i in v.top:(v.top + bh - 1)
         line = i <= length(rows) ? row(rows[i]) : row("")
-        # No cursor while the keyboard is somewhere else. A host that draws this
-        # beside something else - a composer next to the diff it is about - has
-        # two things on screen and one of them has the keys; two cursors would
-        # say neither does. `focused` defaults to true, so a widget that is the
+        # The terminal's cursor where the keys are, and a block where they are
+        # not. A host that draws this beside something else - a composer next
+        # to the diff it is about - has one cursor to give, and gives it to the
+        # side with the keys; the block on the other is where typing goes when
+        # they come back. `focused` defaults to true, so a widget that is the
         # only thing on screen never has to say so.
-        i == crow && v.focused && (line = drawcursor(line, ccol))
+        if i == crow
+            k = length(out) + 1
+            v.focused || (line = drawcursor(line, ccol))
+        end
         push!(out, b.row(line))
     end
     push!(out, b.foot())
     push!(out, b.hint(isempty(v.status) ? v.hint : v.status))
-    centred(out, w, h)
+    (centred(out, w, h), v.focused && k > 0 ? centredat(out, k, ccol, b, w, h) : nothing)
 end
 
 """Put a block on display column `ccol` of `line`, in reverse video.
 
-The cursor is *drawn* rather than placed. A TUI hides the terminal's own cursor
-for the whole run - most of what it draws owes nothing to where the terminal
-thinks it is - and turning it back on here would leave it to be put back by
-every path out of this widget, including the ones that throw.
+A cursor *drawn* rather than placed: the mark for a cursor that does not have
+the keys, since a terminal has one cursor and it goes where they are - see
+[`caret`](@ref). A block cannot blink and ignores the shape the user chose for
+theirs, which is right for a place typing is not going.
 
 `ccol` is a **display** column, because that is what a wrapped row can offer:
 the row was cut at a width, so where the cursor sits in it is a width too. The
@@ -203,17 +214,19 @@ function drawcursor(line::AbstractString, ccol::Int)
     rowcat(pre, faced(slice(x, i, j - 1), CURSOR), slice(x, j, ncodeunits(str)))
 end
 
-"""The block the cursor is drawn as: reverse video, whatever a host's theme
-says - see [`CHROME`](@ref)."""
+"""The block a cursor without the keys is drawn as: reverse video, whatever a
+host's theme says - see [`CHROME`](@ref)."""
 const CURSOR = Face(inverse = true)
 
 """
-    drawfield(line, col, w) -> Row
+    field(line, col, w) -> (Row, Int)
 
-A line in `w` columns with the cursor drawn on it at character column `col`,
-scrolled sideways so the cursor is on screen. What a `LineInput` draws its field
-with, for a host that draws a field of its own - a search typed into a status
-line - and wants it to behave the same.
+A line in `w` columns with the cursor at character column `col`, scrolled
+sideways so the cursor is on screen, and the display column in the row the
+cursor is at. What a `LineInput` and a `Choice`'s query are drawn with, for a
+host that draws a field of its own - a search typed into a status line - and
+wants it to behave the same: it puts the terminal's cursor at that column, as
+[`caret`](@ref) says for a widget, or draws the block with [`drawfield`](@ref).
 
 A `LineInput` and a `Choice`'s query are one row, and the box cuts a line
 longer than that at its end - which is where the cursor is while typing. So a
@@ -221,7 +234,7 @@ cursor that would be cut takes the line with it: the front goes, a `…` says so
 and the cursor sits at the right. Nothing is kept between frames to do it: it
 is a function of the line and the cursor, as the rest of a frame is.
 """
-function drawfield(line::AbstractString, col::Int, w::Int)
+function field(line::AbstractString, col::Int, w::Int)
     s = shown(line)
     cs = collect(s)
     k = clamp(col - 1, 0, length(cs))             # characters before the cursor
@@ -235,10 +248,18 @@ function drawfield(line::AbstractString, col::Int, w::Int)
         while i > 1 && 1 + width(@view cs[(i - 1):k]) + cw <= w - 1
             i -= 1
         end
-        return drawcursor(string("…", String(cs[i:end])), 2 + width(@view cs[i:k]))
+        return (row(string("…", String(cs[i:end]))), 2 + width(@view cs[i:k]))
     end
-    drawcursor(s, displaycolumn(s, col))
+    (row(s), displaycolumn(s, col))
 end
+
+"""
+    drawfield(line, col, w) -> Row
+
+[`field`](@ref) with a block in reverse video where its cursor is: a field that
+does not have the terminal's cursor, and still says where typing goes.
+"""
+drawfield(line::AbstractString, col::Int, w::Int) = drawcursor(field(line, col, w)...)
 
 """The display column the cursor is in, for a cursor counted in characters."""
 displaycolumn(line::AbstractString, col::Int) =

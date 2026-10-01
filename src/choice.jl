@@ -243,7 +243,10 @@ function picked(c::Choice, k::Int)
     0
 end
 
-function render(c::Choice, w::Int, h::Int)
+render(c::Choice, w::Int, h::Int) = first(framed(c, w, h))
+caret(c::Choice, w::Int, h::Int) = last(framed(c, w, h))
+
+function framed(c::Choice, w::Int, h::Int)
     m = matches(c)
     b = dialogbox(w; width = c.maxwidth)
     ch = b.chrome
@@ -257,7 +260,9 @@ function render(c::Choice, w::Int, h::Int)
         push!(out, b.row(l, ch.quiet))
     end
     line = curline(c.input.buf)
-    push!(out, b.row(rowcat("/ ", drawfield(line, c.input.buf.col, b.iw - 2))))
+    f, fc = field(line, c.input.buf.col, b.iw - 2)
+    push!(out, b.row(rowcat("/ ", f)))
+    kq = length(out)
     c.omap = Int[]
     lit = c.anchor == 0 ? (c.sel:c.sel) :
           (min(c.anchor, c.sel):max(c.anchor, c.sel))
@@ -283,7 +288,7 @@ function render(c::Choice, w::Int, h::Int)
     c.boxrows = (blank + 1):(blank + length(out))
     orow = blank + 3 + length(notes)
     c.orows = orow:(orow + bh - 1)
-    centred(out, w, h)
+    (centred(out, w, h), centredat(out, kq, 2 + fc, b, w, h))
 end
 
 """
@@ -431,6 +436,9 @@ function render(c::Confirm, w::Int, h::Int)
     push!(out, b.hint(c.hint))
     centred(out, w, h)
 end
+
+# A question answered by a key has nowhere for typing to go.
+caret(::Confirm, ::Int, ::Int) = nothing
 
 """
     answer(c::Confirm, k) -> Int

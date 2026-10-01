@@ -99,21 +99,26 @@ isblank(v::LineInput) = isblank(v.buf)
 
 Where the cursor is, as a character column in the line: 1 is before the first
 character. With [`text`](@ref), what a host that draws the field itself hands
-[`drawfield`](@ref).
+[`field`](@ref).
 """
 column(v::LineInput) = v.buf.col
 
-function render(v::LineInput, w::Int, h::Int)
+render(v::LineInput, w::Int, h::Int) = first(framed(v, w, h))
+caret(v::LineInput, w::Int, h::Int) = last(framed(v, w, h))
+
+function framed(v::LineInput, w::Int, h::Int)
     b = dialogbox(w; width = v.maxwidth)
     line = curline(v.buf)
     out = Row[b.top(), b.row(v.title, b.chrome.strong), b.row("")]
     for l in rowwraplines(v.note, b.iw)
         push!(out, b.row(l, b.chrome.quiet))
     end
-    push!(out, b.row(rowcat("> ", drawfield(line, v.buf.col, b.iw - 2))))
+    f, fc = field(line, v.buf.col, b.iw - 2)
+    push!(out, b.row(rowcat("> ", f)))
+    k = length(out)
     push!(out, b.foot())
     push!(out, b.hint(isempty(v.status) ? v.hint : v.status))
-    centred(out, w, h)
+    (centred(out, w, h), centredat(out, k, 2 + fc, b, w, h))
 end
 
 """

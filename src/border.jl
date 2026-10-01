@@ -109,9 +109,10 @@ and `ROUNDED`. Nothing ends them: a face ends only what it began. A host that
 sets the three to `Face()` gets chrome with no escapes in it at all, which is
 what a program drawing plain text wants and what a pipe wants.
 
-Not in here: the block that marks where the cursor is in a `TextArea`. Reverse
-video there is not emphasis, it is the only thing saying where typing will go,
-and a host that turned its colours off would otherwise lose it.
+Not in here: the block that marks where a cursor without the keys is - see
+[`drawcursor`](@ref). Reverse video there is not emphasis, it is the only
+thing saying where typing will go, and a host that turned its colours off would
+otherwise lose it.
 """
 const CHROME = Ref((strong = Face(weight = :bold), quiet = Face(weight = :light),
                     focus = Face(inverse = true), box = BOXES.ROUNDED))
@@ -196,6 +197,19 @@ function centred(out::AbstractVector, w::Int, h::Int)
     end
     while length(rows) < h; push!(rows, rowpad("", w)); end
     rows
+end
+
+"""
+    centredat(out, k, c, b, w, h) -> Union{Nothing, Tuple{Int,Int}}
+
+Where row `k` of a built box, display column `c` inside box `b`, lands on the
+screen [`centred`](@ref) puts it on: 1-based `(row, col)`, or `nothing` when
+the box was cut short above it. `c` counts inside the border and its margin,
+which is where every widget writes, as `b.row` lays it out.
+"""
+function centredat(out::AbstractVector, k::Int, c::Int, b, w::Int, h::Int)
+    r = max(0, (h - length(out)) ÷ 2) + k
+    r <= h ? (r, clamp(b.pad + 2 + c, 1, w)) : nothing
 end
 
 """

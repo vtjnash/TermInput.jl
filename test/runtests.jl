@@ -10,7 +10,7 @@
 
 using Test
 using TermInput
-import TermInput: render, handle!, text, chunks, drawcursor, drawfield, displaycolumn
+import TermInput: render, caret, handle!, text, chunks, drawcursor, field, drawfield, displaycolumn
 # The public names that are not exported, as a host would import them.
 import TermInput: settext!, curline, move!, newline!, insertblock!, paste!,
     backspace!, deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
@@ -47,6 +47,19 @@ const REV = Face(inverse = true)
 const SGR_OSC = r"\e\[[0-9;:]*[A-Za-z]|\e\][^\e]*\e[\\]"
 unescaped(s::AbstractString) = replace(String(s), SGR_OSC => "")
 cols(s::AbstractString) = textwidth(unescaped(s))
+# What is on the screen under the terminal's cursor, where `caret` puts it: the
+# character that starts at its column, or `nothing` - in the middle of a wide
+# one, or off the end.
+function cellat(v, w, h)
+    r, c = caret(v, w, h)
+    acc = 1
+    for ch in unescaped(ansi(render(v, w, h)[r]))
+        acc == c && return string(ch)
+        acc += textwidth(ch)
+        acc > c && return nothing
+    end
+    nothing
+end
 
 @testset "TermInput" begin
 
@@ -792,17 +805,26 @@ end
     end
 
     # A line longer than the box scrolls sideways to keep the cursor on it, and
-    # a `…` says what went off the front.
+    # a `…` says what went off the front. The cursor is the terminal's, so the
+    # line it is on is the one `caret` names, and nothing is drawn there.
     long = LineInput("t"; initial = join('a':'z') * join('0':'9') * join('A':'J'))
-    cursorline(v, w) = only(filter(l -> occursin("\e[7m", l), split(screen(render(v, w, 10)), "\n")))
+    cursorline(v, w) = split(screen(render(v, w, 10)), "\n")[caret(v, w, 10)[1]]
     l = unescaped(cursorline(long, 30))
     @test cols(cursorline(long, 30)) == 30 && occursin("> …", l) && occursin("J  ", l)
+    @test !occursin("\e[7m", screen(render(long, 30, 10)))
+    @test cellat(long, 30, 10) == " "                     # after the `J`
     long.buf.col = 1
-    @test occursin("> abc", unescaped(cursorline(long, 30)))
+    @test occursin("> abc", unescaped(cursorline(long, 30))) && cellat(long, 30, 10) == "a"
     long.buf.col = 30
-    l = cursorline(long, 30)
-    @test occursin(string(ansi(faced("3", REV)), "…"), l) && occursin("> …", unescaped(l))
+    l = unescaped(cursorline(long, 30))
+    @test cellat(long, 30, 10) == "3" && occursin("3…", l) && occursin("> …", l)
+    # A field a host draws: the row and the column its cursor is at, or the
+    # row with a block there, for one that does not have the cursor.
+    @test field("abc", 4, 10) == (TermInput.row("abc"), 4)
+    @test field("日本語", 2, 10) == (TermInput.row("日本語"), 3)
     @test drawfield("abc", 4, 10) == drawcursor("abc", 4)
+    @test String(first(field("abcdefghij", 11, 10))) == "…defghij" &&
+          last(field("abcdefghij", 11, 10)) == 9
     @test String(drawfield("abcdefghij", 11, 10)) == "…defghij "
 end
 
@@ -991,9 +1013,11 @@ end
     try
         CHROME[] = plain
         @test !occursin('\e', screen(render(Confirm("t", "a note"), 60, 10)))
-        # Bar the cursor, which is reverse video whatever the chrome says.
-        @test !occursin('\e', replace(screen(render(LineInput("t", "a note"), 60, 10)),
-                                       ansi(faced(" ", REV)) => ""))
+        # And a field, whose cursor is the terminal's; a block, where one is
+        # drawn, is reverse video whatever the chrome says.
+        @test !occursin('\e', screen(render(LineInput("t", "a note"), 60, 10)))
+        @test occursin(ansi(faced(" ", REV)),
+                       screen(render(TextArea("t"; focused = false), 60, 16)))
     finally
         CHROME[] = old
     end
@@ -1344,21 +1368,27 @@ end
     @test occursin("no change", n.status)
 end
 
-@testset "a widget that does not have the keyboard draws no cursor" begin
-    # A host that draws this beside something else has two things on screen and
-    # one of them has the keys. Two cursors would say neither does - so the
-    # widget takes it as a field rather than the host having to paint over the
-    # block afterwards, which is the only other way to get there from outside.
+@testset "the cursor is the terminal's, and a block where the keys are not" begin
+    # A terminal has one cursor and it goes where the keys are: the widget says
+    # where, for `frame_bytes`, and draws nothing there. A host that draws this
+    # beside something else has two things on screen and one of them has the
+    # keys - so the other draws a block in reverse video where its cursor is,
+    # which says where typing goes when the keys come back. A field rather than
+    # the host painting over the frame afterwards, which is the only other way
+    # to get there from outside.
     ta = TextArea("Comment", "on a.jl:11"; initial = "a remark")
     @test ta.focused                                    # the only-thing-on-screen case
     lit = screen(render(ta, 60, 16))
-    @test occursin("\e[7m", lit)
+    @test !occursin("\e[7m", lit)
+    r, c = caret(ta, 60, 16)
+    @test cellat(ta, 60, 16) == " " && endswith(first(unescaped(split(lit, "\n")[r]), c - 1), "a remark")
 
     ta.focused = false
     dark = screen(render(ta, 60, 16))
-    @test !occursin("\e[7m", dark)
-    # Only the cursor goes. Everything else is the same frame, at the same size,
-    # so a host laying two columns against each other gets no shift out of it.
+    @test caret(ta, 60, 16) === nothing
+    @test occursin(string("a remark", ansi(faced(" ", REV))), dark)
+    # Only the cursor changes. Everything else is the same frame, at the same
+    # size, so a host laying two columns against each other gets no shift.
     @test unescaped(dark) == unescaped(lit)
     @test length(split(dark, "\n")) == length(split(lit, "\n")) == 16
 
@@ -1368,7 +1398,31 @@ end
     @test handle!(ta, keycode('!')) === :ok
     @test text(ta) == "a remark!"
     ta.focused = true
-    @test occursin("\e[7m", screen(render(ta, 60, 16)))
+    @test !occursin("\e[7m", screen(render(ta, 60, 16))) && cellat(ta, 60, 16) == " "
+
+    # Where it goes is a display column, past the wide characters before it,
+    # and on the line the box scrolled to.
+    cjk = TextArea("t"; initial = "日本語")
+    handle!(cjk, K_LEFT)
+    @test cellat(cjk, 60, 16) == "語"
+    tall = TextArea("t"; initial = join(string.(1:40), "\n"))
+    @test cellat(tall, 60, 16) == " "
+    r, c = caret(tall, 60, 16)
+    @test r <= 16 && endswith(first(unescaped(ansi(render(tall, 60, 16)[r])), c - 1), "40")
+    for _ in 1:39; handle!(tall, K_UP); end
+    handle!(tall, C_A)
+    @test cellat(tall, 60, 16) == "1"
+    # The query of a `Choice` is where typing goes there; a `Confirm` has none.
+    ch = Choice("Pick", "", ["one", "two"])
+    for k in "tw"; handle!(ch, keycode(k)); end
+    handle!(ch, K_LEFT)
+    # The option under the list's cursor is lit as it was; the query row has
+    # no block on it.
+    @test cellat(ch, 60, 16) == "w"
+    @test !occursin("\e[7m", ansi(render(ch, 60, 16)[caret(ch, 60, 16)[1]]))
+    @test caret(Confirm("Sure?", ""), 60, 16) === nothing
+    # A screen too short for the box cuts it, and the cursor with it.
+    @test caret(LineInput("t", "a\nb\nc\nd"), 60, 3) === nothing
 end
 
 @testset "a misspelt direction is an error, not a key that does nothing" begin

@@ -11,14 +11,20 @@ a string or an option. This is that, for a terminal.
 
 ```julia
 using TermInput
-import TermInput: render, handle!, text
+import TermInput: render, caret, handle!, text
 
 ta = TextArea("Comment", "on src/parse.jl:42")
-write(stdout, frame_bytes(render(ta, 80, 24)))  # `h` rows of `w` columns
+# `h` rows of `w` columns, and the terminal's cursor where typing goes
+write(stdout, frame_bytes(render(ta, 80, 24), "", caret(ta, 80, 24)))
 if handle!(ta, key) === :unhandled      # not an edit, so it is yours
     key == 19 && post(submission(ta))   # ...and this is what `^s` means
 end
 ```
+
+The cursor is the terminal's own, put where `caret` says: it blinks or does
+not, it is the shape the user chose, and it is where an input method opens.
+There is one, so any second mark - a composer drawn beside whatever has the
+keys, a field a host draws with `drawfield` - is a block in reverse video.
 
 No widget reads stdin, holds raw mode, or runs a loop. A host has all three
 already, and a widget that insisted on its own would be one you cannot put in
@@ -132,7 +138,7 @@ A picker, full screen, from nothing but what this package exports:
 
 ```julia
 using TermInput
-import TermInput: render, handle!, paste!
+import TermInput: render, caret, handle!, paste!
 
 function pick(labels; input = stdin, output = stdout)
     c = Choice("Pick one", "", labels)
@@ -140,7 +146,7 @@ function pick(labels; input = stdin, output = stdout)
     try
         while true
             h, w = displaysize(t)
-            write(t, frame_bytes(render(c, w, h)))
+            write(t, frame_bytes(render(c, w, h), "", caret(c, w, h)))
             ev = readevent(t)
             ev isa PasteEvent && (paste!(c, ev.text); continue)
             ev isa KeyEvent || continue
@@ -398,7 +404,7 @@ terminal: the events, `readevent`, `scheme_reports`, `enter_terminal`,
 Public and not exported is the rest of the API, which is either a name a host
 is likely to have already or one it uses once, where it sets a widget up:
 
-* the widget protocol - `render`, `handle!`, `text`, `paste!`, `click!` - and a
+* the widget protocol - `render`, `caret`, `handle!`, `text`, `paste!`, `click!` - and a
   `Choice`'s `query`, `query!`, `selected`, `chosen` and `matches`
 * `TextBuffer`'s operations - `settext!`, `curline`, `move!`, `newline!`,
   `insertblock!`, `backspace!`, `deletechar!`, `killline!`, `killtostart!`,
@@ -407,7 +413,7 @@ is likely to have already or one it uses once, where it sets a widget up:
 * the box - `dialogbox`, `centred`, `boxstyle`, `Box`, `BoxLine`, `BOXES`,
   `CHROME`, `DIALOG_WIDTH` - and
   what a host drawing a field or a list of its own shares with the widgets:
-  `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
+  `field`, `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
   and for rows of faces `Row`, `row`, `rowhead`, `rowtail`,
   `rowlines`, `rowwraplines`, `overlaid`, `linked`, `verbatim` and the break
   they wrap at, `wrapspans`
@@ -443,7 +449,7 @@ own to - and a `maxwidth`, `DIALOG_WIDTH` but for the `TextArea`.
 | `Confirm(title, note, keys = ["yY"]; hint, maxwidth)` | a question only named keys answer, `CONFIRM_HINT`; `answer(c, k)` is which, 0 for no |
 | `listwindow(hs, sel, top, inner)` | the rows of a list, `hs[i]` lines each, that fit a box with the cursor's whole |
 | `v.status` | a line the footer shows instead of the hints, cleared by the next key; not on a `Confirm`, which the next key ends |
-| `ta.focused` | whether a `TextArea` draws its cursor. Only there, because it is the one widget a host draws beside something else; a dialog is always the thing that has the keyboard |
+| `ta.focused` | whether a `TextArea` has the keyboard: the terminal's cursor, from `caret`, while it does, and a block in reverse video where the cursor is while it does not. Only there, because it is the one widget a host draws beside something else; a dialog is always the thing that has the keyboard |
 | `v.hint` | those hints, which name only the keys the widget owns; a host has to add its own |
 | `isblank(v)` | whether there is anything in it - what to ask before deciding what escape costs, or whether an empty one may be sent |
 | `CHROME[]` | the faces it is painted in - `strong`, `quiet` and `focus` (a `Choice`'s cursor), StyledStrings `Face`s that end only what they begin - and the `box` it is drawn with, one of `BOXES` |

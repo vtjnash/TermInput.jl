@@ -103,7 +103,7 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
 # rather than on every call. `import TermInput: render, handle!` where they are
 # wanted. `public` is 1.11's, so it is parsed only where it exists.
 @static if VERSION >= v"1.11.0-DEV.469"
-    eval(Meta.parse("""public render, handle!, text, paste!, click!, column,
+    eval(Meta.parse("""public render, caret, field, handle!, text, paste!, click!, column,
         query, query!, selected, chosen, matches, doubled, DOUBLECLICK, ACTIONS,
         oneline, notetext, drawfield, bufferrows, settext!, curline, move!,
         newline!, insertblock!, backspace!, deletechar!, killline!,
@@ -144,6 +144,30 @@ Public and not exported, because `render` is a name a host is likely to have
 already; `import TermInput: render` where it is not.
 """
 render
+
+"""
+    caret(widget, w, h) -> Union{Nothing, Tuple{Int,Int}}
+
+Where the terminal's own cursor goes in the frame `render(widget, w, h)` draws:
+1-based `(row, col)`, for [`frame_bytes`](@ref) to put it and show it, or
+`nothing` when the widget has nowhere for typing to go - a `Confirm`, or a
+`TextArea` that is not `focused`.
+
+    write(stdout, frame_bytes(render(ta, w, h), "", caret(ta, w, h)))
+
+The real cursor rather than a block drawn in reverse video, because a terminal
+has one of them and it is the one the user set up: it blinks or does not, it is
+the shape they chose, and it is where an input method opens and a screen reader
+reads. A widget that draws one draws no block where it is, so a host that does
+not pass it on shows no cursor at all. Any second mark - a `TextArea` beside
+the thing that has the keys, a field a host draws with [`drawfield`](@ref) - is
+a block in reverse video, since the cursor is spoken for.
+
+The same layout as `render` and computed the same way, so it is right for the
+frame drawn at the same size; a `TextArea` that scrolled to keep its cursor on
+screen has scrolled by the time either is asked.
+"""
+caret
 
 """
     handle!(widget, key) -> Symbol
