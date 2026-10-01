@@ -928,6 +928,26 @@ end
     @test listwindow([1, 3, 2, 1, 1], 2, 1, 3) == (2, 2, 2:2)
     @test listwindow([1, 3, 2, 1, 1], 3, 1, 3) == (3, 3, 3:4)
     @test listwindow([1, 1, 1], 1, 1, 10) == (1, 1, 1:3)
+    # Rows of a line each are the same window, counted rather than summed.
+    for n in 0:6, sel in -1:8, top in -1:8, inner in 1:7
+        @test listwindow(n, sel, top, inner) == listwindow(ones(Int, n), sel, top, inner)
+    end
+    @test listwindow(10, 7, 9, 3) == (7, 7, 7:9)
+    @test listwindow(10, 2, 2, 0)[3] == 2:1             # a box with no room
+    # A page with no cursor passes its top as one, and is kept full.
+    @test listwindow(10, 9, 9, 4)[2] == 7
+
+    # Where the pager's keys and the wheel put the cursor, clamped; a key that
+    # is not one of them is the host's.
+    @test listmove(keycode('j'), 3, 5, 2) == 4 && listmove(K_DOWN, 5, 5, 2) == 5
+    @test listmove(keycode('k'), 1, 5, 2) == 1 && listmove(keycode('k'), 1, 5, 2; lo = 0) == 0
+    @test listmove(keycode(' '), 1, 5, 2) == 3 && listmove(C_F, 4, 5, 2) == 5
+    @test listmove(keycode('b'), 4, 5, 2) == 2 && listmove(K_PGUP, 2, 5, 2) == 1
+    @test listmove(keycode('g'), 4, 5, 2; lo = 0) == 0 && listmove(K_END, 1, 5, 2) == 5
+    @test listmove(keycode('G'), 1, 0, 2) == 1          # an empty list stays at its first
+    @test listmove(keycode('x'), 3, 5, 2) === nothing
+    @test listmove(:wheeldown, 1, 10) == 1 + TermInput.WHEELROWS
+    @test listmove(:wheelup, 2, 10) == 1 && listmove(:press, 2, 10) === nothing
 end
 
 @testset "a question only named keys answer" begin

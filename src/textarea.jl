@@ -155,10 +155,7 @@ function framed(v::TextArea, w::Int, h::Int)
     b = dialogbox(w; width = v.maxwidth)
     bh = max(3, h - 8)                 # rows of text inside the box
     rows, crow, ccol = bufferrows(v.buf, b.iw)
-    v.top = clamp(v.top, 1, max(1, length(rows)))
-    crow < v.top && (v.top = crow)
-    crow > v.top + bh - 1 && (v.top = crow - bh + 1)
-    v.top = clamp(v.top, 1, max(1, length(rows) - bh + 1))
+    _, v.top, _ = listwindow(length(rows), crow, v.top, bh)
 
     out = Row[b.head(v.title)]
     for l in rowwraplines(v.note, b.iw)

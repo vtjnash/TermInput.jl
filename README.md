@@ -46,7 +46,8 @@ A `Choice` is a list in a box with a `LineInput` at its head. Typing narrows
 the list - by the lines under an option as well as the option - and the query
 edits with every key a `LineInput` has. `↑`/`↓` and `^p`/`^n` move the cursor
 an option at a time, and an option of several lines stays whole in the box
-(`listwindow`, which is exported for a host's own lists). `numbered = true`
+(`listwindow`, which is exported for a host's own lists, with `listmove` for
+the keys and the wheel that move a cursor in one). `numbered = true`
 puts the first ten on `1`-`9` and `0`, for a list reached by memory rather than
 by reading. `ranged = true` lets shift-`↑`/`↓` light a run of
 options from where the cursor was, and `chosen(c)` answers the run - or the
@@ -393,7 +394,7 @@ a key code from a host that has already done that.
 
 Exported is what a host driving a widget writes on every call, under names
 specific enough that it is unlikely to have them already: the four widgets and
-their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`,
+their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`, `listmove`,
 `TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
 mouse and bracketed paste, rows of faces and their measuring (`rowwidth`,
 `rowfit`, `rowpad`, `rowmid`, `rowwrap`, `rowcat`, `faced`), `markdown_rows`, the key vocabulary, and what reads it from a
@@ -414,6 +415,7 @@ is likely to have already or one it uses once, where it sets a widget up:
   `CHROME`, `DIALOG_WIDTH` - and
   what a host drawing a field or a list of its own shares with the widgets:
   `field`, `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
+  `WHEELROWS`,
   and for rows of faces `Row`, `row`, `rowhead`, `rowtail`,
   `rowlines`, `rowwraplines`, `overlaid`, `linked`, `verbatim` and the break
   they wrap at, `wrapspans`
@@ -447,7 +449,8 @@ own to - and a `maxwidth`, `DIALOG_WIDTH` but for the `TextArea`.
 | `LineInput(title, note = ""; initial, hint, maxwidth)` | one line in a box, `LINEINPUT_HINT` |
 | `Choice(title, note, labels; numbered, hint, maxwidth)` | one of a list, narrowed by a `LineInput` at its head, `CHOICE_HINT`; `picked(c, k)` says which option `↵` or a digit picks, and `click!(c, kind, x, y, at; window)` is the mouse |
 | `Confirm(title, note, keys = ["yY"]; hint, maxwidth)` | a question only named keys answer, `CONFIRM_HINT`; `answer(c, k)` is which, 0 for no |
-| `listwindow(hs, sel, top, inner)` | the rows of a list, `hs[i]` lines each, that fit a box with the cursor's whole |
+| `listwindow(hs, sel, top, inner)` | the rows of a list, `hs[i]` lines each, that fit a box with the cursor's whole; or `n` rows of a line each, in place of `hs` |
+| `listmove(k, sel, n, page; lo)`, `listmove(kind, sel, n; lo)` | where a pager's key - `j` `k` space `b` `g` `G`, the arrows, the page keys, `^f` `^b` - or the wheel moves a cursor in `lo:n`, or `nothing` for a key that is the host's |
 | `v.status` | a line the footer shows instead of the hints, cleared by the next key; not on a `Confirm`, which the next key ends |
 | `ta.focused` | whether a `TextArea` has the keyboard: the terminal's cursor, from `caret`, while it does, and a block in reverse video where the cursor is while it does not. Only there, because it is the one widget a host draws beside something else; a dialog is always the thing that has the keyboard |
 | `v.hint` | those hints, which name only the keys the widget owns; a host has to add its own |

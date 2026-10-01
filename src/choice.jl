@@ -11,43 +11,6 @@
 # the widget only says which option a key would pick (`picked`).
 
 """
-    listwindow(hs, sel, top, inner) -> (sel, top, rows)
-
-Scroll so the cursor's row is on screen, and report the window to draw: the
-cursor `sel` and the first row shown `top`, both clamped, and the range of rows
-that fit in a box `inner` lines tall.
-
-Rows of `hs[i]` lines each - an option with lines of its own under it, a row of
-a host's list with more to say - so the window is of rows and the box of lines:
-the last row in it may be cut, never the cursor's, unless it is taller than the
-box. Every list shares it: the geometry of a list of rows in a box does not
-depend on what the rows are.
-"""
-function listwindow(hs::Vector{Int}, sel::Int, top::Int, inner::Int)
-    n = length(hs)
-    sel = clamp(sel, 1, max(1, n))
-    top = clamp(top, 1, max(1, n))
-    sel < top && (top = sel)
-    # Down until the whole of the cursor's row fits, or it is the top one.
-    while top < sel && sum(@view hs[top:sel]) > inner
-        top += 1
-    end
-    # And up while the rows above fit in what the list would leave empty at
-    # its foot: a list scrolled to its end, or narrowed under a scrolled top,
-    # fills the box rather than ending half way down it.
-    while top > 1 && sum(@view hs[(top - 1):n]) <= inner
-        top -= 1
-    end
-    last_ = top - 1
-    used = 0
-    while last_ < n && used < inner
-        last_ += 1
-        used += hs[last_]
-    end
-    (sel, top, top:last_)
-end
-
-"""
     doubled(last, x, y, at, window) -> Bool
 
 Is a press at `(x, y)` at time `at` the second half of a double click, where
@@ -348,8 +311,9 @@ means "not this".
 function click!(c::Choice, kind::Symbol, x::Int, y::Int, at::Float64;
                 window::Float64 = DOUBLECLICK)
     n = length(matches(c))
-    if kind === :wheelup || kind === :wheeldown
-        c.sel = clamp(c.sel + (kind === :wheelup ? -3 : 3), 1, max(1, n))
+    to = listmove(kind, c.sel, n)
+    if to !== nothing
+        c.sel = to
         c.anchor = 0
         return :ok
     end

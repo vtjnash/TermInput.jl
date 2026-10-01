@@ -55,6 +55,8 @@ embeds one.
                    armed, onto a channel the host's loop waits on
   * `frame.jl`     `frame_bytes`, a frame as one write, and `input_waiting`,
                    when not to write one
+  * `scroll.jl`    `listwindow` and `listmove`: a cursor in a list taller
+                   than its box, and the box scrolled to keep it
   * `textarea.jl`  `TextArea`, the multi-line composer
   * `lineinput.jl` `LineInput`, one line in a box
   * `choice.jl`    `Choice`, one of a list narrowed by typing, and `Confirm`,
@@ -82,7 +84,7 @@ export rowwidth, rowfit, rowpad, rowmid, rowwrap, rowcat, faced
 export TextBuffer
 export suspend, compose_external, mouse_reporting, bracketed_paste
 export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer,
-       listwindow, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
+       listwindow, listmove, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
 export markdown_rows
 export KeyEvent, PasteEvent, MouseEvent, SchemeEvent, readevent, scheme_reports
 export enter_terminal, leave_terminal, InputReader, arm!, EndEvent, frame_bytes,
@@ -104,7 +106,7 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
 # wanted. `public` is 1.11's, so it is parsed only where it exists.
 @static if VERSION >= v"1.11.0-DEV.469"
     eval(Meta.parse("""public render, caret, field, handle!, text, paste!, click!, column,
-        query, query!, selected, chosen, matches, doubled, DOUBLECLICK, ACTIONS,
+        query, query!, selected, chosen, matches, doubled, DOUBLECLICK, WHEELROWS, ACTIONS,
         oneline, notetext, drawfield, bufferrows, settext!, curline, move!,
         newline!, insertblock!, backspace!, deletechar!, killline!,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
@@ -127,6 +129,7 @@ include("suspend.jl")
 include("terminal.jl")
 include("reader.jl")
 include("frame.jl")
+include("scroll.jl")
 include("textarea.jl")
 include("lineinput.jl")
 include("choice.jl")
