@@ -17,7 +17,7 @@ TermInputHighlightExt = "JuliaSyntaxHighlighting"
 
 [compat]
 InteractiveUtils = "1.10"
-JuliaSyntaxHighlighting = "1.12"
+JuliaSyntaxHighlighting = "0.1, 1.12"
 Markdown = "1.10"
 REPL = "1.10"
 StyledStrings = "1"
