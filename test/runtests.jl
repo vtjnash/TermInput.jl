@@ -20,6 +20,22 @@ import TermInput: settext!, curline, move!, newline!, insertblock!, paste!,
 import TermInput: Row, verbatim, linked, overlaid, rowhead, rowtail, rowlines, rowwraplines
 import InteractiveUtils
 import StyledStrings: Face, SimpleColor
+import StyledStrings
+
+# StyledStrings writes an attribute only when the terminfo for `TERM` has it,
+# and a runner has no `TERM` - `dumb`, with no reverse video, dim or italics.
+# These tests assert on the escapes, so the terminfo already loaded is told it
+# has them: 1.11 reads it before any code runs, and 1.10's StyledStrings has no
+# database of its own to read another from on Windows. It is the same struct in
+# all three places - StyledStrings' global before 1.11, Base's global in 1.11,
+# and Base's once-per-process value after.
+let ti = isdefined(Base, :current_terminfo) ? Base.current_terminfo :
+                                              StyledStrings.current_terminfo
+    ti = applicable(ti) ? ti() : ti
+    merge!(ti.strings, Dict(:enter_dim_mode => "\e[2m", :enter_italics_mode => "\e[3m",
+                            :enter_reverse_mode => "\e[7m", :enter_strikeout_mode => "\e[9m"))
+    merge!(ti.aliases, Dict(:dim => :enter_dim_mode, :smxx => :enter_strikeout_mode))
+end
 
 # What StyledStrings writes for a row, which is what a terminal is sent; and a
 # frame of them, a row to a line.
@@ -1364,9 +1380,17 @@ end
 @testset "every exported or public name says what it is" begin
     # A name a host is told to import and cannot ask about is half an API.
     # `names` lists the public names on 1.11 and the exported ones before it.
+    # `Docs.hasdoc` is 1.11's. Before it, a docstring is in the `meta` of the
+    # module that owns the name - or, for a module, in that module's own.
+    function hasdoc(m, n)
+        isdefined(Docs, :hasdoc) && return Docs.hasdoc(m, n)
+        b = Docs.Binding(m, n)
+        v = getfield(m, n)
+        haskey(Docs.meta(v isa Module ? v : b.mod), b)
+    end
     api = setdiff(names(TermInput), [:TermInput])
-    @test isempty(filter(n -> !Docs.hasdoc(TermInput, n), api))
-    @test isempty(filter(n -> !Docs.hasdoc(TermInput.Keys, n),
+    @test isempty(filter(n -> !hasdoc(TermInput, n), api))
+    @test isempty(filter(n -> !hasdoc(TermInput.Keys, n),
                          setdiff(names(TermInput.Keys), [:Keys])))
     if VERSION >= v"1.11.0-DEV.469"
         # And the names the README tells a host to import are public.

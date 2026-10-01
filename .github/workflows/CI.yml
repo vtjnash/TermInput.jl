@@ -49,6 +49,12 @@ jobs:
       - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        env:
+          # StyledStrings writes an attribute only when the terminfo for `TERM`
+          # has it, and a runner has no `TERM` - `dumb`, with no reverse video,
+          # dim or italics. The tests assert on the escapes, and tell the loaded
+          # terminfo it has them; this is the same said from outside.
+          TERM: xterm-256color
 
       - uses: julia-actions/julia-processcoverage@v1
         if: matrix.version == '1' && runner.os == 'Linux'
