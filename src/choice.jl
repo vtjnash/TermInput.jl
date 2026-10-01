@@ -109,6 +109,11 @@ the one it is on stays in the box ([`listwindow`](@ref)).
 list that is the same list every time and is reached by memory rather than by
 reading, since it costs those ten the ability to be narrowed by typing a digit.
 
+`ranged` lets shift-`↑`/`↓` hold an anchor where the cursor was and light the
+run of options from it to the cursor, for a host that can do something with
+several neighbours at once - a range of commits, say. [`chosen`](@ref) is the
+run, or the option under the cursor; any other move lets the anchor go.
+
 `sel` and `top` are positions in what the query leaves showing
 ([`matches`](@ref)); `picked` and [`selected`](@ref) answer in `labels`.
 `status` and `hint` are fields a host may set, as on a [`TextArea`](@ref).
@@ -121,6 +126,8 @@ mutable struct Choice
     sel::Int
     top::Int
     numbered::Bool
+    ranged::Bool
+    anchor::Int                           # where a shifted move began, 0 for none
     status::String
     hint::String
     maxwidth::Int
@@ -141,22 +148,24 @@ host's - they come back from `handle!` - so a host says so in `hint`.
 const CHOICE_HINT = "↑/↓ move · type to narrow"
 
 """
-    Choice(title, note, labels; numbered = false, hint = CHOICE_HINT,
-           maxwidth = DIALOG_WIDTH)
+    Choice(title, note, labels; numbered = false, ranged = false,
+           hint = CHOICE_HINT, maxwidth = DIALOG_WIDTH)
 
 A list of `labels` titled `title`, with `note` - what picking one does: a
 string, or a vector of rows, see [`notetext`](@ref) - drawn quietly under the
 title. `""` for none; it is not optional here only because `labels` follows it.
 
   * `numbered` puts the first ten on keys of their own, `1`-`9` and `0`
+  * `ranged`   shift-`↑`/`↓` light a run of options; see [`chosen`](@ref)
   * `hint`     the key hints under the box, which a host that binds `↵` and
                escape - every host - adds to
   * `maxwidth` the widest the box is drawn, however wide the screen
 """
 function Choice(title, note, labels::AbstractVector; numbered::Bool = false,
-                hint::AbstractString = CHOICE_HINT, maxwidth::Int = DIALOG_WIDTH)
+                ranged::Bool = false, hint::AbstractString = CHOICE_HINT,
+                maxwidth::Int = DIALOG_WIDTH)
     Choice(String(title), notetext(note), Row[row(l) for l in labels],
-           LineInput(""), 1, 1, numbered, "", String(hint), maxwidth,
+           LineInput(""), 1, 1, numbered, ranged, 0, "", String(hint), maxwidth,
            1:0, 1:0, Int[], (0.0, 0, 0))
 end
 
@@ -201,6 +210,22 @@ function selected(c::Choice)
 end
 
 """
+    chosen(c::Choice) -> Vector{Int}
+
+The options lit, as indices into `labels` in their order: the run from the
+anchor to the cursor in a `ranged` list after a shifted move, else the one
+under the cursor, else none.
+"""
+function chosen(c::Choice)
+    m = matches(c)
+    isempty(m) && return Int[]
+    sel = clamp(c.sel, 1, length(m))
+    c.anchor == 0 && return [m[sel]]
+    a = clamp(c.anchor, 1, length(m))
+    m[min(a, sel):max(a, sel)]
+end
+
+"""
     picked(c::Choice, k) -> Int
 
 The option key `k` picks, as an index into `labels`, or 0 when it picks none:
@@ -234,13 +259,15 @@ function render(c::Choice, w::Int, h::Int)
     line = curline(c.input.buf)
     push!(out, b.row(rowcat("/ ", drawfield(line, c.input.buf.col, b.iw - 2))))
     c.omap = Int[]
+    lit = c.anchor == 0 ? (c.sel:c.sel) :
+          (min(c.anchor, c.sel):max(c.anchor, c.sel))
     for i in win, (j, l) in enumerate(optlines(c.labels[m[i]]))
         length(c.omap) < bh || break
         # The digit, or a space where it has run out, so the names stay in one
         # column whether or not the row has a key of its own; and the lines
         # under an option in that column too.
         label = !c.numbered ? l : rowcat(j == 1 ? numkey(i) : ' ', "  ", l)
-        push!(out, b.row(label, i == c.sel ? ch.focus : ch.quiet))
+        push!(out, b.row(label, i in lit ? ch.focus : ch.quiet))
         push!(c.omap, i)
     end
     while length(c.omap) < bh
@@ -262,15 +289,22 @@ end
 """
     handle!(c::Choice, k) -> Symbol
 
-`↑`/`↓` and `^p`/`^n` move the cursor, and the rest of what a
+`↑`/`↓` and `^p`/`^n` move the cursor - shifted, in a `ranged` list, they
+light a run from where it was ([`chosen`](@ref)) - and the rest of what a
 [`LineInput`](@ref) edits with edits the query. `↵`, escape and - in a numbered
 list - the digits come back, because what picking means is the host's; see
 [`picked`](@ref) for which option they would pick.
 """
 function handle!(c::Choice, k::Int)
-    k = unshift(k)
     c.status = ""
     n = length(matches(c))
+    if c.ranged && k in (K_SUP, K_SDOWN)
+        c.anchor == 0 && (c.anchor = clamp(c.sel, 1, max(1, n)))
+        c.sel = clamp(c.sel + (k == K_SDOWN ? 1 : -1), 1, max(1, n))
+        return :ok
+    end
+    k = unshift(k)
+    k in (13, 10) || (c.anchor = 0)
     if k in (K_DOWN, C_N)
         c.sel = clamp(c.sel + 1, 1, max(1, n))
     elseif k in (K_UP, C_P)
@@ -311,6 +345,7 @@ function click!(c::Choice, kind::Symbol, x::Int, y::Int, at::Float64;
     n = length(matches(c))
     if kind === :wheelup || kind === :wheeldown
         c.sel = clamp(c.sel + (kind === :wheelup ? -3 : 3), 1, max(1, n))
+        c.anchor = 0
         return :ok
     end
     kind === :press || return :ok
@@ -322,6 +357,7 @@ function click!(c::Choice, kind::Symbol, x::Int, y::Int, at::Float64;
     i = get(c.omap, y - first(c.orows) + 1, 0)
     1 <= i <= n || return :ok
     c.sel = i
+    c.anchor = 0
     dbl ? :pick : :ok
 end
 

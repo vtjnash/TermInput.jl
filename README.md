@@ -42,10 +42,12 @@ edits with every key a `LineInput` has. `↑`/`↓` and `^p`/`^n` move the curso
 an option at a time, and an option of several lines stays whole in the box
 (`listwindow`, which is exported for a host's own lists). `numbered = true`
 puts the first ten on `1`-`9` and `0`, for a list reached by memory rather than
-by reading.
+by reading. `ranged = true` lets shift-`↑`/`↓` light a run of
+options from where the cursor was, and `chosen(c)` answers the run - or the
+one option under the cursor - for a host that can take several at once.
 
 `picked` and `answer` are exported. `click!`, and a `Choice`'s `query`,
-`query!`, `selected` and `matches`, are names a host is likely to have already,
+`query!`, `selected`, `chosen` and `matches`, are names a host is likely to have already,
 so they are public and imported by name the way `render` and `handle!` are.
 
 `click!(c, kind, x, y, at; window)` is the mouse, against where the last
@@ -397,7 +399,7 @@ Public and not exported is the rest of the API, which is either a name a host
 is likely to have already or one it uses once, where it sets a widget up:
 
 * the widget protocol - `render`, `handle!`, `text`, `paste!`, `click!` - and a
-  `Choice`'s `query`, `query!`, `selected` and `matches`
+  `Choice`'s `query`, `query!`, `selected`, `chosen` and `matches`
 * `TextBuffer`'s operations - `settext!`, `curline`, `move!`, `newline!`,
   `insertblock!`, `backspace!`, `deletechar!`, `killline!`, `killtostart!`,
   `deleteword!`, `killwordforward!`, `kill!`, `yank!`, `transpose!`,

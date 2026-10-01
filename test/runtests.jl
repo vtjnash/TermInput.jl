@@ -818,6 +818,20 @@ end
     n = Choice("t", "", ["one", "two"]; numbered = true)
     @test handle!(n, keycode('2')) === :unhandled && picked(n, keycode('2')) == 2
     @test picked(n, keycode('5')) == 0 && query(n) == ""
+    # A ranged list lights a run under shift and answers it as `chosen`; a
+    # plain move lets it go, and an unranged list takes shift as the arrow.
+    import TermInput: chosen
+    r = Choice("t", "", ["a", "b", "c", "d"]; ranged = true)
+    @test chosen(r) == [1]
+    handle!(r, K_DOWN); handle!(r, K_SDOWN); handle!(r, K_SDOWN)
+    @test chosen(r) == [2, 3, 4] && selected(r) == 4
+    handle!(r, K_SUP); handle!(r, K_SUP); handle!(r, K_SUP)
+    @test chosen(r) == [1, 2]
+    @test handle!(r, 13) === :unhandled && chosen(r) == [1, 2]     # ↵ keeps it
+    handle!(r, K_DOWN)
+    @test chosen(r) == [2]
+    handle!(n, K_SDOWN)
+    @test chosen(n) == [2]
     # The default hint names only the keys the widget owns: picking and
     # escape come back, so saying what they do is the host's.
     @test occursin(CHOICE_HINT, screen(render(n, 80, 24)))
