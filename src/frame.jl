@@ -137,5 +137,5 @@ Julia stops reading a stream nobody is waiting on, so this is the rest of the
 last read, up to what the pty delivered at once, and false between keys typed
 by hand - each of which still draws its frame.
 """
-input_waiting(io::IO) = bytesavailable(io) > 0
+input_waiting(io::IO) = (bytesavailable(io)::Int) > 0   # `io` is any `IO`
 input_waiting(t::HeldTerminal) = input_waiting(t.in)

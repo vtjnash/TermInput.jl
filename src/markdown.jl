@@ -461,7 +461,8 @@ function block!(out::Vector{MDRow}, l::Markdown.List, w::Int, ctx::Ctx)
     ordered = l.ordered >= 0
     top = l.ordered + length(l.items) - 1
     nw = ordered ? max(ndigits(max(l.ordered, 0)), ndigits(max(top, 0))) : 0
-    loose = l.loose && any(item -> length(item) > 1, l.items)
+    # `items` is the stdlib's `Vector{Any}`; the `Int` keeps `loose` a `Bool`.
+    loose = l.loose && any(item -> (length(item)::Int) > 1, l.items)
     for (k, item) in enumerate(l.items)
         marker = ordered ? string(lpad(string(l.ordered + k - 1), nw), ". ") : "• "
         mw = textwidth(marker)

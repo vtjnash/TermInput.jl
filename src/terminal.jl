@@ -139,6 +139,6 @@ function suspend(f, t::HeldTerminal)
     end
 end
 
-Base.displaysize(t::HeldTerminal) = displaysize(t.out)
+Base.displaysize(t::HeldTerminal) = displaysize(t.out)::Tuple{Int,Int}   # `out` is any `IO`
 Base.write(t::HeldTerminal, x) = write(t.out, x)
 readevent(t::HeldTerminal) = readevent(t.in)
