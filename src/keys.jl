@@ -8,7 +8,7 @@ A submodule because it is the piece with the fewest ties to anything else. It
 is the widgets' binding table: `handle!` takes one of these codes, so producing
 them is the whole of what a host has to do to drive a widget.
 
-[`readevent`](@ref) produces them from a terminal's bytes. A host that reads
+[`readevent`](@ref TermInput.readevent) produces them from a terminal's bytes. A host that reads
 keys some other way - a multiplexer that has already put every terminal's keys
 into one form, a protocol `readevent` does not speak, something that is not a
 terminal at all - produces them itself, and the widgets cannot tell.

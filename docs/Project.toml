@@ -1,0 +1,10 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+TermInput = "e53b28ee-00f8-475a-85b8-1918fdda0ee8"
+
+# The package is the checkout this sits in, not a registered version of it.
+[sources]
+TermInput = {path = ".."}
+
+[compat]
+Documenter = "1"

@@ -1,5 +1,8 @@
 # TermInput.jl
 
+[Documentation](https://vtjnash.github.io/TermInput.jl/dev/): this README, and every
+docstring.
+
 Text input for the terminal: a line to answer a question in, a box to write a
 paragraph in, a list to pick one of and a question only a named key answers,
 drawn wherever your own TUI puts them.
@@ -467,6 +470,17 @@ Everything, with no tty and no setup: `render` is pure, `handle!` takes a key
 code, `readevent` reads an `IOBuffer` as well as a terminal, and the one thing that touches a real terminal - `suspend` - is asserted
 on the escape sequences it writes. The `$EDITOR` path is driven through
 `InteractiveUtils.define_editor` rather than by installing an editor.
+
+## Documentation
+
+```bash
+julia --project=docs -e 'using Pkg; Pkg.instantiate()'
+julia --project=docs docs/make.jl
+```
+
+builds the site into `docs/build`: this README as its first page, and
+every docstring after it. CI builds it on every push and publishes `main`'s at
+the link at the top.
 
 ## License
 
