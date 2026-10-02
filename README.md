@@ -415,7 +415,7 @@ is likely to have already or one it uses once, where it sets a widget up:
   `CHROME`, `DIALOG_WIDTH` - and
   what a host drawing a field or a list of its own shares with the widgets:
   `field`, `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
-  `WHEELROWS`,
+  `WHEEL_ROWS`,
   and for rows of faces `Row`, `row`, `rowhead`, `rowtail`,
   `rowlines`, `rowwraplines`, `overlaid`, `linked`, `verbatim` and the break
   they wrap at, `wrapspans`

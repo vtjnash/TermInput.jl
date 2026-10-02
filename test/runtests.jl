@@ -946,7 +946,7 @@ end
     @test listmove(keycode('g'), 4, 5, 2; lo = 0) == 0 && listmove(K_END, 1, 5, 2) == 5
     @test listmove(keycode('G'), 1, 0, 2) == 1          # an empty list stays at its first
     @test listmove(keycode('x'), 3, 5, 2) === nothing
-    @test listmove(:wheeldown, 1, 10) == 1 + TermInput.WHEELROWS
+    @test listmove(:wheeldown, 1, 10) == 1 + TermInput.WHEEL_ROWS
     @test listmove(:wheelup, 2, 10) == 1 && listmove(:press, 2, 10) === nothing
 end
 

@@ -55,12 +55,13 @@ function listwindow(n::Int, sel::Int, top::Int, inner::Int)
 end
 
 """
-    WHEELROWS
+    WHEEL_ROWS
 
-How far one notch of the wheel moves a cursor: three rows, which is what a
-terminal scrolls its own screen by.
+How far one notch of the wheel moves, in rows: three, which is what a terminal
+scrolls its own screen by. One number for a cursor in a list and for a screen
+scrolled back through, so the wheel moves as far over either.
 """
-const WHEELROWS = 3
+const WHEEL_ROWS = 3
 
 """
     listmove(k, sel, n, page; lo = 1) -> Union{Int, Nothing}
@@ -75,7 +76,7 @@ a row, space, `^f` and page down - `b`, `^b` and page up - a `page` of rows,
 `Choice`, has letters spoken for and binds the arrows itself.
 
 With a `Symbol`, it is the mouse: `:wheelup` and `:wheeldown` move it
-[`WHEELROWS`](@ref), and any other `kind` is `nothing`. The wheel moves the
+[`WHEEL_ROWS`](@ref), and any other `kind` is `nothing`. The wheel moves the
 cursor rather than only the window, because the window follows the cursor
 ([`listwindow`](@ref)) and would spring back at the next frame.
 
@@ -96,6 +97,6 @@ function listmove(k::Int, sel::Int, n::Int, page::Int; lo::Int = 1)
 end
 
 function listmove(kind::Symbol, sel::Int, n::Int; lo::Int = 1)
-    d = kind === :wheelup ? -WHEELROWS : kind === :wheeldown ? WHEELROWS : 0
+    d = kind === :wheelup ? -WHEEL_ROWS : kind === :wheeldown ? WHEEL_ROWS : 0
     d == 0 ? nothing : clamp(sel + d, lo, max(lo, n))
 end

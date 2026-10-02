@@ -106,7 +106,7 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
 # wanted. `public` is 1.11's, so it is parsed only where it exists.
 @static if VERSION >= v"1.11.0-DEV.469"
     eval(Meta.parse("""public render, caret, field, handle!, text, paste!, click!, column,
-        query, query!, selected, chosen, matches, doubled, DOUBLECLICK, WHEELROWS, ACTIONS,
+        query, query!, selected, chosen, matches, doubled, DOUBLECLICK, WHEEL_ROWS, ACTIONS,
         oneline, notetext, drawfield, bufferrows, settext!, curline, move!,
         newline!, insertblock!, backspace!, deletechar!, killline!,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
