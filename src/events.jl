@@ -240,7 +240,7 @@ function read_osc(io::IO)
         end
     end
     m = match(BG_REPORT, String(body))
-    m === nothing || m.offset != 1 ? KeyEvent(K_NONE) : SchemeEvent(nothing, String(m[1]), UInt8[])
+    m === nothing || m.offset != 1 ? KeyEvent(K_NONE) : SchemeEvent(nothing, String(something(m[1])), UInt8[])
 end
 
 # The body of a CSI sequence, with its `ESC [` already read.

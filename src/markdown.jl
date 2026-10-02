@@ -616,13 +616,13 @@ function block!(out::Vector{MDRow}, t::Markdown.Table, w::Int, ctx::Ctx)
         h = maximum(length, wrapped)
         src = join((rstrip(plaintext(c)) for c in r), " | ")
         for j in 1:h
-            r = styled(string(l.left), rule)
+            drawn = styled(string(l.left), rule)
             for k in 1:n
                 line = j <= length(wrapped[k]) ? wrapped[k][j] : Run[]
-                r = rowcat(r, " ", aligned(line, cw[k], align[k]), " ",
-                           styled(string(k == n ? l.right : l.vertical), rule))
+                drawn = rowcat(drawn, " ", aligned(line, cw[k], align[k]), " ",
+                               styled(string(k == n ? l.right : l.vertical), rule))
             end
-            push!(out, MDRow(rowpad(r, w), string("| ", src, " |"), j == 1))
+            push!(out, MDRow(rowpad(drawn, w), string("| ", src, " |"), j == 1))
         end
         h
     end

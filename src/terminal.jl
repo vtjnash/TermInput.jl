@@ -77,6 +77,14 @@ function enter_terminal(in::IO = stdin, out::IO = stdout; altscreen::Bool = fals
     t
 end
 
+# Raw mode on or off where `t` holds a tty. The field is copied first: a test of
+# `t.tty` does not narrow the `t.tty` read after it.
+function tty_raw!(t::HeldTerminal, on::Bool)
+    tty = t.tty
+    tty === nothing || REPL.Terminals.raw!(tty, on)
+    nothing
+end
+
 """
     leave_terminal(t::HeldTerminal)
 
@@ -97,7 +105,7 @@ function leave_terminal(t::HeldTerminal)
     catch
     end
     try
-        t.tty === nothing || REPL.Terminals.raw!(t.tty, false)
+        tty_raw!(t, false)
     catch
     end
     try
@@ -119,13 +127,13 @@ is the rule about where it may be called from.
 function suspend(f, t::HeldTerminal)
     write(t.out, string(t.mouse ? mouse_reporting(false) : "",
                         t.paste ? bracketed_paste(false) : ""))
-    t.tty === nothing || REPL.Terminals.raw!(t.tty, false)
+    tty_raw!(t, false)
     write(t.out, string("\e[?25h", t.altscreen ? "\e[?1049l" : ""))
     try
         f()
     finally
         write(t.out, string(t.altscreen ? "\e[?1049h" : "", "\e[?25l"))
-        t.tty === nothing || REPL.Terminals.raw!(t.tty, true)
+        tty_raw!(t, true)
         write(t.out, string(t.mouse ? mouse_reporting(true) : "",
                             t.paste ? bracketed_paste(true) : ""))
     end
