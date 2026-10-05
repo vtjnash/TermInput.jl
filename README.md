@@ -126,7 +126,15 @@ itself and takes none of what follows. A host that has nothing composes these.
   at its edge rather than pushing the frame down a row. A row is a `Row`,
   written by StyledStrings in its faces whatever the stream, or a `String`
   written as it is; a `verbatim` piece of one is written untouched and closed,
-  and the cursor moved past its width for the rest of the row.
+  and the cursor moved past its width for the rest of the row - which is
+  `writerow`, for a host placing rows itself. A frame need not be the whole
+  screen: `top` starts it at a line and `region = :keep` leaves the host's
+  scroll region alone, for a strip pinned under output that goes on
+  scrolling; and `inline = n` draws it under the cursor, over the `n` lines
+  the last one left above it, for a prompt asked in the middle of a
+  program's output. `render(widget, w)`, with no height, is a widget drawn
+  that way: the box and its hint at their own height, no blank rows round
+  them, and `caret(widget, w)` in it.
   **`input_waiting(t)`** says whether bytes already read are waiting behind the
   event just taken; a host that skips the frame while they are draws a burst
   once, at its end, and never waits to find out.
@@ -310,16 +318,23 @@ rs[i].first    # whether this row starts that line
   or a quote too - as wide as its cells, and when that is too wide the widest
   columns are narrowed first and their cells wrapped rather than cut.
 * **Links are labels.** Where a url goes - a footnote, an OSC 8 link, nowhere -
-  is the host's.
+  is the host's; or after the label in brackets, given a `url` face to draw it
+  in.
+* **What reads differently from one host to the next is the style's.** A
+  list's bullets by depth and its numbers' format, a footnote as `[^1]` or
+  `[1]`, a code span highlighted as Julia or not, how a table is ruled and
+  padded - each a field of `MarkdownStyle` beside the faces. `pad = false`
+  leaves each row at its own width.
 * **Where the stdlib's tree is wrong, the renderer reads around it.** A list
   is marked loose whenever a blank line follows it, so `loose` is believed
-  only when an item has more than one block; two spaces ending a line stay in
-  the text, and are read as the break CommonMark says they are.
+  only when an item has more than one block besides a list inside it; two
+  spaces ending a line stay in the text, and are read as the break CommonMark
+  says they are.
 * **A row's `src` is what the row shows.** A list item's line starts behind
   its `• `, a quote's behind its `│ `, and that is in the `src`; a table row's
   is its cells between pipes, and a rule's is empty. A table has a rule
   between body rows only when a cell wrapped, which is when they need telling
-  apart.
+  apart, unless the style says otherwise.
 * **Anything unknown is its text.** An element a later Julia adds, or one an
   older one lacks, is drawn as `Markdown.plain` draws it, unstyled: a version
   skew costs styling and never text.
@@ -348,9 +363,15 @@ as a `Row` to each line, for a host that draws a block of code its own way.
 ## The box, and the measuring
 
 The border is drawn from `BOXES`, this package's own table of box characters -
-`ROUNDED`, `SQUARE`, `HEAVY`, `DOUBLE` and `MINIMAL_HEAVY_HEAD`, by the names
-Term gives them - and which one is `CHROME[].box`, set beside the faces it is
-painted in. Nothing here depends on Term.
+`ROUNDED`, `SQUARE`, `HEAVY`, `DOUBLE`, the table boxes `MINIMAL_HEAVY_HEAD`,
+`SIMPLE`, `MINIMAL` and the rest of the eighteen, by the names and in the
+characters Term gives them - and which one is `CHROME[].box`, set beside the
+faces it is painted in. Nothing here depends on Term. A box has eight lines, a
+footer's rule and line among them, and `tablerows(cells, w; header, footer,
+…)` lays a table out in one: columns at their widest or fitted to `w`, cells
+wrapped or cut to them, padded and aligned, a row as tall as its tallest cell,
+and the rules between - what `markdown_rows` draws a table with, for a host
+with cells of its own, or rows it drew of something else.
 
 The measuring is this package's own, and deliberately so. Term's `Panel`
 measures *markup*, which is wrong here in both directions at once. A title or a
@@ -409,7 +430,7 @@ Public and not exported is the rest of the API, which is either a name a host
 is likely to have already or one it uses once, where it sets a widget up:
 
 * the widget protocol - `render`, `caret`, `handle!`, `text`, `paste!`, `click!` - and a
-  `Choice`'s `query`, `query!`, `selected`, `chosen` and `matches`
+  `Choice`'s `query`, `query!`, `selected`, `select!`, `chosen` and `matches`
 * `TextBuffer`'s operations - `settext!`, `curline`, `move!`, `newline!`,
   `insertblock!`, `backspace!`, `deletechar!`, `killline!`, `killtostart!`,
   `deleteword!`, `killwordforward!`, `kill!`, `yank!`, `transpose!`,
@@ -417,11 +438,11 @@ is likely to have already or one it uses once, where it sets a widget up:
 * the box - `dialogbox`, `centred`, `boxstyle`, `Box`, `BoxLine`, `BOXES`,
   `CHROME`, `DIALOG_WIDTH` - and
   what a host drawing a field or a list of its own shares with the widgets:
-  `field`, `drawfield`, `column`, `oneline`, `notetext`, `doubled`, `DOUBLECLICK`,
-  `WHEEL_ROWS`,
+  `field`, `drawfield`, `drawcursor`, `column`, `oneline`, `notetext`, `doubled`,
+  `DOUBLECLICK`, `WHEEL_ROWS`, `writerow` and `tablerows`,
   and for rows of faces `Row`, `row`, `rowhead`, `rowtail`,
-  `rowlines`, `rowwraplines`, `overlaid`, `linked`, `verbatim` and the break
-  they wrap at, `wrapspans`
+  `rowlines`, `rowwraplines`, `rowrstrip`, `rowvpad`, `overlaid`, `linked`,
+  `verbatim` and the break they wrap at, `wrapspans`
 * `MarkdownStyle`, `MDRow`, `highlight`, `codemime` and `highlighted_lines`,
   which a host drawing markdown builds, reads, extends and borrows
 * `ACTIONS`, which is what `handle!` answers
@@ -450,7 +471,7 @@ own to - and a `maxwidth`, `DIALOG_WIDTH` but for the `TextArea`.
 | `TextArea(title, note = ""; initial, hint, maxwidth, focused)` | the composer, `TEXTAREA_HINT` and 100 columns by default |
 | `handle!(ta, k; suspend)` | how the terminal is handed back while `$EDITOR` runs |
 | `LineInput(title, note = ""; initial, hint, maxwidth)` | one line in a box, `LINEINPUT_HINT` |
-| `Choice(title, note, labels; numbered, hint, maxwidth)` | one of a list, narrowed by a `LineInput` at its head, `CHOICE_HINT`; `picked(c, k)` says which option `↵` or a digit picks, and `click!(c, kind, x, y, at; window)` is the mouse |
+| `Choice(title, note, labels; numbered, ranged, filter, horizontal, selected, hint, maxwidth)` | one of a list, narrowed by a `LineInput` at its head, `CHOICE_HINT`; `picked(c, k)` says which option `↵` or a digit picks, and `click!(c, kind, x, y, at; window)` is the mouse. With `filter = false` a menu, with no query and its letters the host's; `horizontal` moves it with `←`/`→`; `selected` and `select!(c, i)` put the cursor on an option |
 | `Confirm(title, note, keys = ["yY"]; hint, maxwidth)` | a question only named keys answer, `CONFIRM_HINT`; `answer(c, k)` is which, 0 for no |
 | `listwindow(hs, sel, top, inner)` | the rows of a list, `hs[i]` lines each, that fit a box with the cursor's whole; or `n` rows of a line each, in place of `hs` |
 | `listmove(k, sel, n, page; lo)`, `listmove(kind, sel, n; lo)` | where a pager's key - `j` `k` space `b` `g` `G`, the arrows, the page keys, `^f` `^b` - or the wheel moves a cursor in `lo:n`, or `nothing` for a key that is the host's |

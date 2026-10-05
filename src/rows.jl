@@ -233,24 +233,59 @@ end
 
 """The mark of a cut, in the faces over byte `at` of `s` - so a bold title
 cut short ends in a bold `…`."""
-function ellipsis(s::Row, at::Int)
-    anns = Annot[annot(1:3, annlabel(a), annvalue(a)) for a in annots(s)
+function ellipsis(s::Row, at::Int, mark::AbstractString = "…")
+    anns = Annot[annot(1:ncodeunits(mark), annlabel(a), annvalue(a)) for a in annots(s)
                  if at in annregion(a) && annlabel(a) !== :verbatim]
-    Row("…", anns)
+    Row(String(mark), anns)
 end
 
 """
-    rowfit(s, w) -> Row
+    rowfit(s, w; mark = "…", word = false) -> Row
 
-`s` cut to `w` columns, with a `…` at the cut in the faces it was cut through;
+`s` cut to `w` columns, with `mark` at the cut in the faces it was cut through;
 as it is when it fits. A verbatim piece that does not fit whole is cut before.
+
+`mark` is what says text was cut - `"..."` where a terminal's fonts are not
+trusted with `…` - and `word` cuts at the last space that leaves room for it,
+as [`rowwrap`](@ref) would break the line there, rather than mid-word. A mark
+wider than `w` is itself cut to `w`.
 """
-function rowfit(s::AbstractString, w::Int)
+function rowfit(s::AbstractString, w::Int; mark::AbstractString = "…", word::Bool = false)
     x = row(s)
     w <= 0 && return Row("", Annot[])
     rowwidth(x) <= w && return x
-    head = rowhead(x, w - 1)
-    rowcat(head, ellipsis(x, ncodeunits(head.string) + 1))
+    room = w - textwidth(mark)
+    room < 0 && return rowhead(ellipsis(x, 1, mark), w)
+    head = word && room > 0 ? first(rowwrap(x, room)) : rowhead(x, room)
+    rowcat(head, ellipsis(x, ncodeunits(head.string) + 1, mark))
+end
+
+"""
+    rowrstrip(s) -> Row
+
+`s` with the whitespace at its end taken off, whatever faces it is in - for a
+row padded to a width that a host wants at its own.
+"""
+function rowrstrip(s::AbstractString)
+    x = row(s)
+    k = findlast(!isspace, x.string)
+    k === nothing ? Row("", Annot[]) : slice(x, 1, nextind(x.string, k) - 1)
+end
+
+"""
+    rowvpad(rows, w, h, at = :top) -> Vector{Row}
+
+`rows` made `h` rows tall with blank rows of `w` spaces, which carry no face:
+added below them (`:top`), above them (`:bottom`), or both, the odd one below
+(`:center`). Rows past `h` are kept - this pads and never cuts.
+"""
+function rowvpad(rows::AbstractVector, w::Int, h::Int, at::Symbol = :top)
+    n = h - length(rows)
+    out = Row[row(r) for r in rows]
+    n <= 0 && return out
+    above = at === :bottom ? n : at === :center ? n ÷ 2 : 0
+    blank = row(" "^max(w, 0))
+    vcat(fill(blank, above), out, fill(blank, n - above))
 end
 
 """

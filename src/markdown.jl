@@ -36,6 +36,9 @@ link is the link's underline and bold both.
   * `code`, `code_tick`  a code span, and its backticks inside it
   * `codeblock`          a code block, padded to the width so it reads as one
   * `link`               a link's label, and an image's alt text
+  * `url`                a link's url, drawn after its label in brackets in
+                         this face - or `nothing`, the default, for a host that
+                         shows urls its own way and draws the label alone
   * `blockquote`         the bar down a block quote's left
   * `note`, `tip`, `warning`, `danger`, `info`
                          an admonition's bar and title, by category; any other
@@ -45,8 +48,26 @@ link is the link's underline and bold both.
   * `rule`               a horizontal rule
   * `latex`, `footnote`, `html`
                          what the terminal can only show the source of
+  * `marker`, `number`   a list's bullets, and an ordered list's numbers
   * `box`                the [`Box`](@ref) a table is drawn with
   * `faces`              a highlighter's faces, by name - see [`highlight`](@ref)
+
+And how some things are laid out, which is the same in every style but these:
+
+  * `bullets`      the marks of a list's items, by how deep the list is: the
+                   first for a list, the second for one inside it, and round
+                   again past the last. `("• ",)`, every level the same
+  * `numbers`      the mark of an ordered list's item, `%s` its number -
+                   right-aligned to the widest of them: `"%s. "`
+  * `inlinecode`   a code span is highlighted as Julia, as a block with no
+                   language is, rather than drawn in `code` alone
+  * `footnote_ref` how a footnote is referred to, `%s` its id: `"[^%s]"`, as it
+                   was written, or `"[%s]"`, as a reader would; its definition
+                   is led by the same and a colon
+  * `table_rows`   which of a table's body rows a rule goes between - see the
+                   `rules` of [`tablerows`](@ref): `:wrapped`, `:always` or
+                   `:never`
+  * `cellpad`      the spaces each side of a table cell's text
 
 Passed to each render rather than held globally, so a render depends on nothing
 but its arguments: a host with a theme builds one when the theme changes. The
@@ -79,9 +100,21 @@ Base.@kwdef struct MarkdownStyle
     latex::Face = NOSTYLE
     footnote::Face = NOSTYLE
     html::Face = NOSTYLE
+    url::Union{Nothing,Face} = nothing
+    marker::Face = NOSTYLE
+    number::Face = NOSTYLE
     box::Box = BOXES.ROUNDED
     faces::Dict{Symbol,Face} = Dict{Symbol,Face}()
+    bullets::Tuple{Vararg{String}} = ("• ",)
+    numbers::String = "%s. "
+    inlinecode::Bool = false
+    footnote_ref::String = "[^%s]"
+    table_rows::Symbol = :wrapped
+    cellpad::Int = 1
 end
+
+"How `st` refers to footnote `id`."
+footref(st::MarkdownStyle, id::AbstractString) = replace(st.footnote_ref, "%s" => id)
 
 """
     MDRow(text, src, first)
@@ -103,8 +136,12 @@ end
     highlight(mime::MIME, code) -> Vector{Tuple{UnitRange{Int},Symbol}}
     highlight(lang::AbstractString, code)
 
-Byte ranges of `code` and the face each is drawn in, for a code block of type
-`mime`. The face is looked up in a [`MarkdownStyle`](@ref)'s `faces`.
+Ranges of `code` and the face each is drawn in, for a code block of type
+`mime`. The face is looked up in a [`MarkdownStyle`](@ref)'s `faces`. A range
+is a string range, from where its first character starts to where its last
+one does, so `code[r]` is the text it covers, multibyte characters and all; a
+highlighter of a host's that answers byte ranges ending on a last byte is read
+the same.
 
 A language is a type, so a highlighter is a method on its own `MIME`, and one
 never replaces another: Julia's own answers `MIME"text/julia"` from 1.12,
@@ -221,11 +258,14 @@ end
 
 # --- inline -----------------------------------------------------------------
 
-"What a block's inline content is drawn with, and whether a newline breaks."
+"""What a block's inline content is drawn with, whether a newline breaks, and
+how many lists deep it is."""
 struct Ctx
     st::MarkdownStyle
     breaks::Bool
+    depth::Int
 end
+Ctx(st::MarkdownStyle, breaks::Bool) = Ctx(st, breaks, 0)
 
 with(stack::Vector{Face}, s::Face) = s == NOSTYLE ? stack : vcat(stack, [s])
 
@@ -269,8 +309,17 @@ inline!(lines::Vector{Line}, x::Markdown.Bold, ctx::Ctx, stack) =
     inline!(lines, x.text, ctx, with(stack, ctx.st.bold))
 inline!(lines::Vector{Line}, x::Markdown.Italic, ctx::Ctx, stack) =
     inline!(lines, x.text, ctx, with(stack, ctx.st.italic))
-inline!(lines::Vector{Line}, x::Markdown.Link, ctx::Ctx, stack) =
+"""A link, as its label - and its url after it in brackets, when the style has
+a face for one."""
+function inline!(lines::Vector{Line}, x::Markdown.Link, ctx::Ctx, stack)
     inline!(lines, x.text, ctx, with(stack, ctx.st.link))
+    u = ctx.st.url
+    if u !== nothing && !isempty(x.url)
+        addrun!(lines, " ", stack)
+        addrun!(lines, string("(", x.url, ")"), with(stack, u))
+    end
+    nothing
+end
 inline!(lines::Vector{Line}, x::Markdown.Image, ctx::Ctx, stack) =
     addrun!(lines, x.alt, with(stack, ctx.st.link))
 inline!(lines::Vector{Line}, ::Markdown.LineBreak, ctx::Ctx, stack) =
@@ -286,10 +335,11 @@ end
         addrun!(lines, x.content, with(stack, ctx.st.html))
 end
 inline!(lines::Vector{Line}, x::Markdown.Footnote, ctx::Ctx, stack) =
-    addrun!(lines, string("[^", x.id, "]"), with(stack, ctx.st.footnote))
+    addrun!(lines, footref(ctx.st, x.id), with(stack, ctx.st.footnote))
 
 """A code span keeps its backticks - they are part of what a copy produces -
-and as many of them as it takes to hold one written inside it."""
+and as many of them as it takes to hold one written inside it. With
+`inlinecode`, what is between them is highlighted as a block in Julia is."""
 function inline!(lines::Vector{Line}, x::Markdown.Code, ctx::Ctx, stack)
     code = replace(x.code, '\n' => ' ')
     longest = maximum((length(m.match) for m in eachmatch(r"`+", code)); init = 0)
@@ -297,7 +347,16 @@ function inline!(lines::Vector{Line}, x::Markdown.Code, ctx::Ctx, stack)
     pad = startswith(code, '`') || endswith(code, '`') ? " " : ""
     inner = with(stack, ctx.st.code)
     addrun!(lines, tick, with(inner, ctx.st.code_tick))
-    addrun!(lines, string(pad, code, pad), inner)
+    if ctx.st.inlinecode
+        addrun!(lines, pad, inner)
+        hl, _ = codelines(code, "", ctx.st, inner; tabs = false)
+        for r in only(hl)
+            addrun!(lines, r.text, r.styles)
+        end
+        addrun!(lines, pad, inner)
+    else
+        addrun!(lines, string(pad, code, pad), inner)
+    end
     addrun!(lines, tick, with(inner, ctx.st.code_tick))
     nothing
 end
@@ -449,27 +508,34 @@ function block!(out::Vector{MDRow}, c::Markdown.Code, w::Int, ctx::Ctx)
     out
 end
 
-"""A list: `•`, or the number right-aligned to the widest one, and the item
-hung beside it - so a list inside it is indented by the width of its marker.
-A loose list has a blank row between items; a tight one has none, even between
-the blocks of one item.
+"""A list: the style's bullet for how deep it is, in `marker`, or its number
+right-aligned to the widest one in the style's `numbers`, in `number`, and the
+item hung beside it - so a list inside
+it is indented by the width of its marker. A loose list has a blank row between
+items; a tight one has none, even between the blocks of one item.
 
-Loose is taken from the tree only when an item has more than one block in it:
-the stdlib marks a list loose when a blank line follows it, which is every list
-with a paragraph after it, and that list is tight where GitHub draws it."""
+Loose is taken from the tree only when an item has more than one block in it,
+a list inside it not counted: the stdlib marks a list loose when a blank line
+follows it, which is every list with a paragraph after it, and that list is
+tight where GitHub draws it - as is one whose item is a line and a list under
+it, which needs no blank line to be written."""
 function block!(out::Vector{MDRow}, l::Markdown.List, w::Int, ctx::Ctx)
     ordered = l.ordered >= 0
     top = l.ordered + length(l.items) - 1
     nw = ordered ? max(ndigits(max(l.ordered, 0)), ndigits(max(top, 0))) : 0
     # `items` is the stdlib's `Vector{Any}`; the `Int` keeps `loose` a `Bool`.
-    loose = l.loose && any(item -> (length(item)::Int) > 1, l.items)
+    loose = l.loose && any(item -> count(x -> !(x isa Markdown.List), item) > 1, l.items)
+    bullets = ctx.st.bullets
+    bullet = isempty(bullets) ? "• " : bullets[mod1(ctx.depth + 1, length(bullets))]
+    inner = Ctx(ctx.st, ctx.breaks, ctx.depth + 1)
     for (k, item) in enumerate(l.items)
-        marker = ordered ? string(lpad(string(l.ordered + k - 1), nw), ". ") : "• "
+        marker = ordered ? replace(ctx.st.numbers, "%s" => lpad(string(l.ordered + k - 1), nw)) :
+                           bullet
         mw = textwidth(marker)
-        rows = blocks!(MDRow[], item, max(1, w - mw), ctx; loose)
+        rows = blocks!(MDRow[], item, max(1, w - mw), inner; loose)
         isempty(rows) && push!(rows, blank(max(1, w - mw)))
         k > 1 && loose && push!(out, blank(w))
-        prefixed!(out, rows, marker, " "^mw)
+        prefixed!(out, rows, styled(marker, ordered ? ctx.st.number : ctx.st.marker), " "^mw)
     end
     out
 end
@@ -502,20 +568,22 @@ function block!(out::Vector{MDRow}, a::Markdown.Admonition, w::Int, ctx::Ctx)
     prefixed!(out, rows, bar, bar)
 end
 
-"""A footnote's definition, as a paragraph led by its reference. Its reference
-in the text is an inline one, drawn as `[^id]` where it was written."""
+"""A footnote's definition, as a paragraph led by its reference and a colon.
+Its reference in the text is an inline one, drawn where it was written; both
+in `footnote`, as the style's `footnote_ref` says, `[^id]` unless it says
+otherwise."""
 function block!(out::Vector{MDRow}, f::Markdown.Footnote, w::Int, ctx::Ctx)
-    lead = Run(string("[^", f.id, "]:"), with(Face[], ctx.st.footnote))
+    lead = Run(footref(ctx.st, f.id), with(Face[], ctx.st.footnote))
     content = f.text === nothing ? Any[] : f.text
     if !isempty(content) && first(content) isa Markdown.Paragraph
         lines = inlines(first(content).content, ctx)
-        pushfirst!(lines[1], lead, Run(" ", Face[]))
+        pushfirst!(lines[1], lead, Run(": ", Face[]))
         for line in lines
             wrapped!(out, line, w)
         end
         rest = content[2:end]
     else
-        wrapped!(out, Run[lead], w)
+        wrapped!(out, Run[lead, Run(":", Face[])], w)
         rest = content
     end
     isempty(rest) || (push!(out, blank(w)); blocks!(out, rest, w, ctx))
@@ -557,43 +625,18 @@ end
 
 # --- tables -----------------------------------------------------------------
 
-"The narrowest a column is made to fit a table in, unless it is narrower."
-const TABLE_FLOOR = 4
-
-"""Column widths for cells `nat` columns wide at their widest, in a table that
-has `w` to fit in: each at its widest, and while that is too wide, the widest
-narrowed a column at a time, down to `TABLE_FLOOR`."""
-function fitcolumns(nat::Vector{Int}, w::Int)
-    cw = copy(nat)
-    room = w - (3 * length(cw) + 1)       # a bar and a space each side of each
-    while sum(cw; init = 0) > room
-        k = argmax(cw)
-        cw[k] <= TABLE_FLOOR && break
-        cw[k] -= 1
-    end
-    cw
-end
-
-"One line of a cell, `cw` wide, aligned as its column is."
-function aligned(line::Line, cw::Int, align::Symbol)
-    d = max(0, cw - runwidth(line))
-    s = emit(line)
-    align === :r ? rowcat(" "^d, s) :
-    align === :c ? rowcat(" "^(d ÷ 2), s, " "^(d - d ÷ 2)) : rowcat(s, " "^d)
-end
-
-"""A table, drawn in `style.box` at its indent: the header in `table_head`, the
-box in `table_rule`, a column aligned as its `---` says. It is as wide as its
-cells, and narrower when that is too wide, with the widest columns narrowed
-first and their cells wrapped rather than cut. A rule goes between the body's
-rows only when one of them takes more than a line, which is when it is needed
-to tell them apart."""
+"""A table, drawn by [`tablerows`](@ref) in `style.box`: the header in
+`table_head`, the box in `table_rule`, a column aligned as its `---` says,
+`cellpad` each side of a cell. It is as wide as its cells, and narrower when
+that is too wide, with the widest columns narrowed first and their cells
+wrapped rather than cut. A rule goes between the body's rows as `table_rows`
+says - by default only when one of them takes more than a line, which is when
+it is needed to tell them apart."""
 function block!(out::Vector{MDRow}, t::Markdown.Table, w::Int, ctx::Ctx)
     isempty(t.rows) && return out
-    st, box = ctx.st, ctx.st.box
-    rule = st.table_rule
+    st = ctx.st
     n = maximum(length, t.rows)
-    align = [k <= length(t.align) ? t.align[k] : :l for k in 1:n]
+    align = Symbol[k <= length(t.align) ? t.align[k] : :l for k in 1:n]
     # Each cell as one line of runs: a cell is a line in GitHub's tables, and a
     # break written inside one is a space here.
     cell(x, head) = begin
@@ -608,36 +651,21 @@ function block!(out::Vector{MDRow}, t::Markdown.Table, w::Int, ctx::Ctx)
     end
     cells = [[k <= length(r) ? cell(r[k], i == 1) : Run[] for k in 1:n]
              for (i, r) in enumerate(t.rows)]
-    nat = [max(1, maximum(runwidth(c[k]) for c in cells)) for k in 1:n]
-    cw = fitcolumns(nat, w)
-    edge(l::BoxLine) = styled(string(l.left, join((string(l.mid)^(c + 2) for c in cw),
-                                                  l.vertical), l.right), rule)
-    function body!(r, l::BoxLine)
-        wrapped = [wraprun(r[k], cw[k]) for k in 1:n]
-        h = maximum(length, wrapped)
-        src = join((rstrip(plaintext(c)) for c in r), " | ")
-        for j in 1:h
-            drawn = styled(string(l.left), rule)
-            for k in 1:n
-                line = j <= length(wrapped[k]) ? wrapped[k][j] : Run[]
-                drawn = rowcat(drawn, " ", aligned(line, cw[k], align[k]), " ",
-                               styled(string(k == n ? l.right : l.vertical), rule))
-            end
-            push!(out, MDRow(rowpad(drawn, w), string("| ", src, " |"), j == 1))
-        end
-        h
+    srcs = [string("| ", join((rstrip(plaintext(c)) for c in r), " | "), " |") for r in cells]
+    body = Row[emit(cells[i][k]) for i in 2:length(cells), k in 1:n]
+    # The header alone is a table of one row with nothing under its rule, as
+    # it was drawn before there were body rows to put there.
+    rows, origin = tablelayout(body, w; header = Row[emit(c) for c in cells[1]],
+                               justify = align, pad = st.cellpad, box = st.box,
+                               rule = st.table_rule, rules = st.table_rows)
+    if isempty(body)
+        keep = [k for k in eachindex(rows) if k != length(rows) - 1]
+        rows, origin = rows[keep], origin[keep]
     end
-    push!(out, MDRow(rowpad(edge(box.top), w), "", true))
-    body!(cells[1], box.head)
-    if length(cells) > 1
-        push!(out, MDRow(rowpad(edge(box.head_row), w), "", true))
-        tall = any(r -> any(k -> runwidth(r[k]) > cw[k], 1:n), cells[2:end])
-        for (i, r) in enumerate(cells[2:end])
-            i > 1 && tall && push!(out, MDRow(rowpad(edge(box.row), w), "", true))
-            body!(r, box.mid)
-        end
+    for (k, r) in enumerate(rows)
+        o = origin[k]
+        push!(out, MDRow(rowpad(r, w), o == 0 ? "" : srcs[o], o == 0 || origin[k-1] != o))
     end
-    push!(out, MDRow(rowpad(edge(box.bottom), w), "", true))
     out
 end
 
@@ -659,7 +687,8 @@ end
 # --- the entry point --------------------------------------------------------
 
 """
-    markdown_rows(md::Markdown.MD, w; style = MarkdownStyle(), breaks = false) -> Vector{MDRow}
+    markdown_rows(md::Markdown.MD, w; style = MarkdownStyle(), breaks = false,
+                  pad = true) -> Vector{MDRow}
 
 `md` drawn as rows of exactly `w` display columns, each carrying the line it
 came from - see [`MDRow`](@ref). Pure: the same tree, width and style give the
@@ -669,14 +698,21 @@ same rows.
 comment, rather than a space, as a document is read. Julia's `Markdown` keeps
 the newline in the text from 1.14; before that there is none for it to act on.
 
+`pad = false` leaves each row at its own width, never wider than `w`, the
+blanks at its end taken off ([`rowrstrip`](@ref)) - for a host placing rows
+beside something else, or writing them where nothing is drawn after them.
+
 The host parses, with the flavor it wants, and the urls of links are the
-host's to show: a link is drawn as its label.
+host's to show: a link is drawn as its label, unless the style has a `url`
+face to draw the url after it in.
 """
 function markdown_rows(md::Markdown.MD, w::Int; style::MarkdownStyle = MarkdownStyle(),
-                       breaks::Bool = false)
+                       breaks::Bool = false, pad::Bool = true)
     w = max(w, 1)
     rows = blocks!(MDRow[], md.content, w, Ctx(style, breaks))
     # Every row is `w` already; this is the guarantee, for the one case that
     # is not - a box or a marker wider than a very narrow width - cut to fit.
+    pad || return [MDRow(rowrstrip(rowwidth(r.text) <= w ? r.text : rowfit(r.text, w)),
+                         r.src, r.first) for r in rows]
     [rowwidth(r.text) == w ? r : MDRow(rowpad(r.text, w), r.src, r.first) for r in rows]
 end

@@ -34,7 +34,9 @@ end
 BoxLine(s::AbstractString) = BoxLine(collect(s)...)
 
 """
+    Box(name, top, head, head_row, mid, row, foot_row, foot, bottom)
     Box(name, top, head, head_row, mid, row, bottom)
+    Box(name, lines)
 
 The characters of a box, a [`BoxLine`](@ref) for each kind of line in it:
 
@@ -43,9 +45,15 @@ The characters of a box, a [`BoxLine`](@ref) for each kind of line in it:
     ├─┼┤ head_row  the rule under the header
     │ ││ mid       every other line inside the box
     ├─┼┤ row       a rule between two rows of a table
+    ├─┼┤ foot_row  the rule over a table's footer
+    │ ││ foot      the cells of the footer
     ╰─┴╯ bottom
 
-A widget's border uses `top`, `mid` and `bottom`; a table uses all six.
+A widget's border uses `top`, `mid` and `bottom`; a table uses all eight. Given
+six, the footer's two are the body's: `foot_row` is `row` and `foot` is `mid`.
+`lines` is the same as a string, a line of four characters to each, six or
+eight of them - a newline after the last is allowed, so a box can be written as
+a block in triple quotes.
 """
 struct Box
     name::Symbol
@@ -54,25 +62,55 @@ struct Box
     head_row::BoxLine
     mid::BoxLine
     row::BoxLine
+    foot_row::BoxLine
+    foot::BoxLine
     bottom::BoxLine
 end
-Box(name::Symbol, rows::AbstractString) = Box(name, (BoxLine(r) for r in split(rows, '\n'))...)
+Box(name::Symbol, top::BoxLine, head::BoxLine, head_row::BoxLine, mid::BoxLine,
+    row::BoxLine, bottom::BoxLine) = Box(name, top, head, head_row, mid, row, row, mid, bottom)
+function Box(name::Symbol, rows::AbstractString)
+    ls = split(chomp(rows), '\n')
+    length(ls) in (6, 8) ||
+        throw(ArgumentError("a box is six or eight lines, not $(length(ls))"))
+    Box(name, (BoxLine(r) for r in ls)...)
+end
 
 """
     BOXES
 
 The boxes there are, by name: `ROUNDED` (the default), `SQUARE`, `HEAVY`,
-`DOUBLE`, and `MINIMAL_HEAVY_HEAD` - no outer edge, a heavy rule under the
-header, which is how a table reads when it is not meant to look like a
-dialog. The names are Term's, so a theme written for Term names the same box
-here.
+`DOUBLE`, and the ones a table is drawn in that do not look like a dialog -
+`MINIMAL_HEAVY_HEAD`, no outer edge and a heavy rule under the header, and the
+rest of the eighteen: `NONE` (spaces), `ASCII`, `ASCII2`, `ASCII_DOUBLE_HEAD`,
+`SQUARE_DOUBLE_HEAD`, `MINIMAL`, `MINIMAL_DOUBLE_HEAD`, `SIMPLE`,
+`SIMPLE_HEAD`, `SIMPLE_HEAVY`, `HORIZONTALS`, `HEAVY_EDGE`, `HEAVY_HEAD` and
+`DOUBLE_EDGE`. The names and characters are Term's, so a theme written for
+Term names the same box here.
 """
 const BOXES = (
-    ROUNDED = Box(:ROUNDED, "╭─┬╮\n│ ││\n├─┼┤\n│ ││\n├─┼┤\n╰─┴╯"),
-    SQUARE = Box(:SQUARE, "┌─┬┐\n│ ││\n├─┼┤\n│ ││\n├─┼┤\n└─┴┘"),
-    HEAVY = Box(:HEAVY, "┏━┳┓\n┃ ┃┃\n┣━╋┫\n┃ ┃┃\n┣━╋┫\n┗━┻┛"),
-    DOUBLE = Box(:DOUBLE, "╔═╦╗\n║ ║║\n╠═╬╣\n║ ║║\n╠═╬╣\n╚═╩╝"),
-    MINIMAL_HEAVY_HEAD = Box(:MINIMAL_HEAVY_HEAD, "  ╷ \n  │ \n╺━┿╸\n  │ \n╶─┼╴\n  ╵ "),
+    NONE = Box(:NONE, "    \n    \n    \n    \n    \n    \n    \n    "),
+    ASCII = Box(:ASCII, "+--+\n| ||\n|-+|\n| ||\n|-+|\n|-+|\n| ||\n+--+"),
+    ASCII2 = Box(:ASCII2, "+-++\n| ||\n+-++\n| ||\n+-++\n+-++\n| ||\n+-++"),
+    ASCII_DOUBLE_HEAD = Box(:ASCII_DOUBLE_HEAD,
+        "+-++\n| ||\n+=++\n| ||\n+-++\n+-++\n| ||\n+-++"),
+    SQUARE = Box(:SQUARE, "┌─┬┐\n│ ││\n├─┼┤\n│ ││\n├─┼┤\n├─┼┤\n│ ││\n└─┴┘"),
+    SQUARE_DOUBLE_HEAD = Box(:SQUARE_DOUBLE_HEAD,
+        "┌─┬┐\n│ ││\n╞═╪╡\n│ ││\n├─┼┤\n├─┼┤\n│ ││\n└─┴┘"),
+    MINIMAL = Box(:MINIMAL, "  ╷ \n  │ \n╶─┼╴\n  │ \n╶─┼╴\n╶─┼╴\n  │ \n  ╵ "),
+    MINIMAL_HEAVY_HEAD = Box(:MINIMAL_HEAVY_HEAD,
+        "  ╷ \n  │ \n╺━┿╸\n  │ \n╶─┼╴\n╶─┼╴\n  │ \n  ╵ "),
+    MINIMAL_DOUBLE_HEAD = Box(:MINIMAL_DOUBLE_HEAD,
+        "  ╷ \n  │ \n ═╪ \n  │ \n ─┼ \n ─┼ \n  │ \n  ╵ "),
+    SIMPLE = Box(:SIMPLE, "    \n    \n ── \n    \n    \n ── \n    \n    "),
+    SIMPLE_HEAD = Box(:SIMPLE_HEAD, "    \n    \n ── \n    \n    \n    \n    \n    "),
+    SIMPLE_HEAVY = Box(:SIMPLE_HEAVY, "    \n    \n ━━ \n    \n    \n ━━ \n    \n    "),
+    HORIZONTALS = Box(:HORIZONTALS, " ── \n    \n ── \n    \n ── \n ── \n    \n ── "),
+    ROUNDED = Box(:ROUNDED, "╭─┬╮\n│ ││\n├─┼┤\n│ ││\n├─┼┤\n├─┼┤\n│ ││\n╰─┴╯"),
+    HEAVY = Box(:HEAVY, "┏━┳┓\n┃ ┃┃\n┣━╋┫\n┃ ┃┃\n┣━╋┫\n┣━╋┫\n┃ ┃┃\n┗━┻┛"),
+    HEAVY_EDGE = Box(:HEAVY_EDGE, "┏━┯┓\n┃ │┃\n┠─┼┨\n┃ │┃\n┠─┼┨\n┠─┼┨\n┃ │┃\n┗━┷┛"),
+    HEAVY_HEAD = Box(:HEAVY_HEAD, "┏━┳┓\n┃ ┃┃\n┡━╇┩\n│ ││\n├─┼┤\n├─┼┤\n│ ││\n└─┴┘"),
+    DOUBLE = Box(:DOUBLE, "╔═╦╗\n║ ║║\n╠═╬╣\n║ ║║\n╠═╬╣\n╠═╬╣\n║ ║║\n╚═╩╝"),
+    DOUBLE_EDGE = Box(:DOUBLE_EDGE, "╔═╤╗\n║ │║\n╟─┼╢\n║ │║\n╟─┼╢\n╟─┼╢\n║ │║\n╚═╧╝"),
 )
 
 """
@@ -183,10 +221,12 @@ end
 
 """
     centred(out, w, h) -> Vector{Row}
+    centred(out, w, nothing) -> Vector{Row}
 
 Put a built box in the middle of the screen and pad it out to a whole frame:
 `h` rows of exactly `w` display columns, which is the contract every `render`
-here keeps.
+here keeps. With `nothing` for `h`, the box at its own height - each row padded
+to `w`, none added above or below - which is what `render(widget, w)` draws.
 """
 function centred(out::AbstractVector, w::Int, h::Int)
     top = max(0, (h - length(out)) ÷ 2)
@@ -198,6 +238,7 @@ function centred(out::AbstractVector, w::Int, h::Int)
     while length(rows) < h; push!(rows, rowpad("", w)); end
     rows
 end
+centred(out::AbstractVector, w::Int, ::Nothing) = Row[rowpad(l, w) for l in out]
 
 """
     centredat(out, k, c, b, w, h) -> Union{Nothing, Tuple{Int,Int}}
@@ -205,12 +246,17 @@ end
 Where row `k` of a built box, display column `c` inside box `b`, lands on the
 screen [`centred`](@ref) puts it on: 1-based `(row, col)`, or `nothing` when
 the box was cut short above it. `c` counts inside the border and its margin,
-which is where every widget writes, as `b.row` lays it out.
+which is where every widget writes, as `b.row` lays it out. `h` is `nothing`
+for a box at its own height.
 """
-function centredat(out::AbstractVector, k::Int, c::Int, b, w::Int, h::Int)
-    r = max(0, (h - length(out)) ÷ 2) + k
-    r <= h ? (r, clamp(b.pad + 2 + c, 1, w)) : nothing
+function centredat(out::AbstractVector, k::Int, c::Int, b, w::Int, h::Union{Nothing,Int})
+    r = (h === nothing ? 0 : max(0, (h - length(out)) ÷ 2)) + k
+    h === nothing || r <= h ? (r, clamp(b.pad + 2 + c, 1, w)) : nothing
 end
+
+"""How many blank rows `centred` puts above a box of `n` rows: none when the box
+is drawn at its own height."""
+blankabove(n::Int, h::Union{Nothing,Int}) = h === nothing ? 0 : max(0, (h - n) ÷ 2)
 
 """
     notetext(note) -> Row

@@ -60,7 +60,7 @@ has the terminal's cursor or a block where the cursor would be; see the
 constructor.
 """
 mutable struct TextArea
-    title::String
+    title::Row
     note::Row
     buf::TextBuffer
     top::Int                 # first display row shown
@@ -84,7 +84,8 @@ const TEXTAREA_HINT = "⌥e/^o \$EDITOR · ^w word · ^a/^e line · ^y yank"
     TextArea(title, note = ""; initial = "", hint = TEXTAREA_HINT, maxwidth = 100,
              focused = true)
 
-A composer titled `title`, with `note` - what it is about, a line or several:
+A composer titled `title` - a string, or a [`Row`](@ref) whose faces are kept
+under the title's weight - with `note` - what it is about, a line or several:
 a string, or a vector of rows, see [`notetext`](@ref) - drawn quietly under the
 title.
 
@@ -107,7 +108,7 @@ given with the key, to [`handle!`](@ref).
 TextArea(title, note = ""; initial::AbstractString = "",
          hint::AbstractString = TEXTAREA_HINT, maxwidth::Int = 100,
          focused::Bool = true) =
-    TextArea(String(title), notetext(note), TextBuffer(initial), 1, "", String(hint),
+    TextArea(row(title), notetext(note), TextBuffer(initial), 1, "", String(hint),
              maxwidth, focused)
 
 text(v::TextArea) = text(v.buf)
@@ -150,11 +151,15 @@ isblank(v::TextArea) = isblank(v.buf)
 
 render(v::TextArea, w::Int, h::Int) = first(framed(v, w, h))
 caret(v::TextArea, w::Int, h::Int) = last(framed(v, w, h))
+render(v::TextArea, w::Int) = first(framed(v, w, nothing))
+caret(v::TextArea, w::Int) = last(framed(v, w, nothing))
 
-function framed(v::TextArea, w::Int, h::Int)
+function framed(v::TextArea, w::Int, h::Union{Nothing,Int})
     b = dialogbox(w; width = v.maxwidth)
-    bh = max(3, h - 8)                 # rows of text inside the box
     rows, crow, ccol = bufferrows(v.buf, b.iw)
+    # Rows of text inside the box: what the screen leaves, or at its own
+    # height as many as are written, and three at the least either way.
+    bh = max(3, h === nothing ? length(rows) : h - 8)
     _, v.top, _ = listwindow(length(rows), crow, v.top, bh)
 
     out = Row[b.head(v.title)]
@@ -182,7 +187,13 @@ function framed(v::TextArea, w::Int, h::Int)
     (centred(out, w, h), v.focused && k > 0 ? centredat(out, k, ccol, b, w, h) : nothing)
 end
 
-"""Put a block on display column `ccol` of `line`, in reverse video.
+"""
+    drawcursor(line, ccol, face = Face(inverse = true)) -> Row
+
+`line` with a block on display column `ccol`, in reverse video: the character
+there, or a space after the end of the line - reverse video over nothing paints
+nothing at all. For a host that draws the rows of a field itself and wants the
+mark a widget draws; `face` is for one whose block is a colour of its own.
 
 A cursor *drawn* rather than placed: the mark for a cursor that does not have
 the keys, since a terminal has one cursor and it goes where they are - see
@@ -195,7 +206,7 @@ walk below is what keeps the three counts apart - a byte index into a line with
 an accent in it throws, and a character index into one with a CJK character in
 it draws the block a column to the left of where the terminal will put it.
 """
-function drawcursor(line::AbstractString, ccol::Int)
+function drawcursor(line::AbstractString, ccol::Int, face::Face = CURSOR)
     x = row(line)
     str = x.string
     acc, i = 0, firstindex(str)
@@ -206,9 +217,9 @@ function drawcursor(line::AbstractString, ccol::Int)
     pre = slice(x, 1, i - 1)
     # A blank under the block, so a cursor past the end of the line is still
     # somewhere: reverse video over nothing paints nothing at all.
-    i > lastindex(str) && return rowcat(pre, faced(" ", CURSOR))
+    i > lastindex(str) && return rowcat(pre, faced(" ", face))
     j = nextind(str, i)
-    rowcat(pre, faced(slice(x, i, j - 1), CURSOR), slice(x, j, ncodeunits(str)))
+    rowcat(pre, faced(slice(x, i, j - 1), face), slice(x, j, ncodeunits(str)))
 end
 
 """The block a cursor without the keys is drawn as: reverse video, whatever a

@@ -23,7 +23,10 @@ function TermInput.highlight(::MIME"text/julia", code::AbstractString)
         f isa Symbol || continue
         name = String(f)
         startswith(name, "julia_") && (name = name[7:end])
-        push!(out, (a.region, Symbol(name)))
+        # The highlighter's regions end on the last byte of their last
+        # character; a string range ends where that character starts.
+        r = a.region
+        push!(out, (first(r):thisind(code, last(r)), Symbol(name)))
     end
     out
 end

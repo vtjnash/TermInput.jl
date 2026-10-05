@@ -28,7 +28,7 @@ no edit for. What it *means* - accept, or accept-unless-empty, or nothing - is
 the host's, the same as everywhere else.
 """
 mutable struct LineInput
-    title::String
+    title::Row
     note::Row
     buf::TextBuffer
     status::String
@@ -50,8 +50,9 @@ const LINEINPUT_HINT = "^w word · ^a/^e line · ^y yank"
     LineInput(title, note = ""; initial = "", hint = LINEINPUT_HINT,
               maxwidth = DIALOG_WIDTH)
 
-A field titled `title`, with `note` - what the answer is for, or what shape it
-takes: a string, or a vector of rows, see [`notetext`](@ref) - drawn quietly
+A field titled `title` - a string, or a [`Row`](@ref) whose faces are kept
+under the title's weight - with `note` - what the answer is for, or what shape
+it takes: a string, or a vector of rows, see [`notetext`](@ref) - drawn quietly
 between the title and the field.
 
   * `initial`  what the field starts with, the cursor after it: a value that is
@@ -66,7 +67,7 @@ fields a host may set afterwards, as on a [`TextArea`](@ref).
 """
 LineInput(title, note = ""; initial::AbstractString = "",
           hint::AbstractString = LINEINPUT_HINT, maxwidth::Int = DIALOG_WIDTH) =
-    LineInput(String(title), notetext(note), TextBuffer(oneline(initial)), "",
+    LineInput(row(title), notetext(note), TextBuffer(oneline(initial)), "",
               String(hint), maxwidth)
 
 """
@@ -105,8 +106,10 @@ column(v::LineInput) = v.buf.col
 
 render(v::LineInput, w::Int, h::Int) = first(framed(v, w, h))
 caret(v::LineInput, w::Int, h::Int) = last(framed(v, w, h))
+render(v::LineInput, w::Int) = first(framed(v, w, nothing))
+caret(v::LineInput, w::Int) = last(framed(v, w, nothing))
 
-function framed(v::LineInput, w::Int, h::Int)
+function framed(v::LineInput, w::Int, h::Union{Nothing,Int})
     b = dialogbox(w; width = v.maxwidth)
     line = curline(v.buf)
     out = Row[b.top(), b.row(v.title, b.chrome.strong), b.row("")]

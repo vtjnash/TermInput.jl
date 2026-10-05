@@ -1547,6 +1547,8 @@ end
         @test texts(drawn("- a\n\n  more\n- b")) == ["• a", "", "  more", "", "• b"]
         # ...and tight when all that makes it loose is what follows it.
         @test texts(drawn("- a\n- b\n\nafter")) == ["• a", "• b", "", "after"]
+        # ...or what follows it and a list inside an item.
+        @test texts(drawn("- a\n- b:\n    - c\n\nafter")) == ["• a", "• b:", "  • c", "", "after"]
         # An empty item still has its bullet.
         @test texts(drawn("- a\n- \n- c")) == ["• a", "•", "• c"]
         @test texts(drawn("> said\n>\n> twice")) == ["│ said", "│", "│ twice"]
@@ -1599,9 +1601,13 @@ end
         @test occursin("word", join(texts(rs)))
         @test count(r -> occursin("word", ansi(r.text)), rs) > 1
         @test count(r -> startswith(unescaped(ansi(r.text)), "├"), rs) == 2
-        # A column with no room is narrowed only so far.
-        @test TermInput.fitcolumns([50, 50], 10) == [TermInput.TABLE_FLOOR, TermInput.TABLE_FLOOR]
-        @test TermInput.fitcolumns([3, 30], 30) == [3, 20]
+        # A column with no room is narrowed only so far; the room is what is
+        # left for the text once the bars and padding are paid for.
+        @test TermInput.fitcolumns([50, 50], 3) == [TermInput.TABLE_FLOOR, TermInput.TABLE_FLOOR]
+        @test TermInput.fitcolumns([3, 30], 23) == [3, 20]
+        @test texts(drawn(t; style = MarkdownStyle(cellpad = 0)))[1] == "╭─────┬──╮"
+        @test count(r -> startswith(r, "├"),
+                    texts(drawn(t; style = MarkdownStyle(table_rows = :always)))) == 2
     end
 
     @testset "nesting" begin
@@ -1735,6 +1741,275 @@ end
         @test Base.get_extension(TermInput, :TermInputHighlightExt) === nothing
         @test highlight("julia", "x = 1") == Tuple{UnitRange{Int},Symbol}[]
     end
+end
+
+@testset "highlight's ranges index the code" begin
+    code = "f(x) = x × \"é\""
+    for (r, _) in TermInput.highlight("julia", code)
+        @test isvalid(code, first(r)) && isvalid(code, last(r))
+        @test code[r] isa String
+    end
+    if VERSION >= v"1.12"
+        st = TermInput.MarkdownStyle(faces = Dict(:string => Face(foreground = SimpleColor(:green))))
+        ls = TermInput.highlighted_lines("julia", code, st)
+        @test unescaped(ansi(only(ls))) == code
+    end
+end
+
+@testset "a frame from a line, a strip, or under the cursor" begin
+    rows3 = [rowpad("one", 10), rowpad("two", 10), rowpad("three", 10)]
+    # A strip from line 20: its own lines, erased rather than deleted, and the
+    # host's scroll region left as it is.
+    s = String(frame_bytes(rows3, "", (2, 4); top = 20, region = :keep))
+    @test occursin("\e[20H\e[2Kone", s) && occursin("\e[22H\e[2Kthree", s)
+    @test !occursin("\e[r", s) && !occursin("\e[M", s)
+    @test occursin("\e[21;4H\e[?25h", s)
+    # From a line with the region reset: the screen's way, moved down.
+    s = String(frame_bytes(rows3; top = 5))
+    @test occursin("\e[r", s) && occursin("\e[5H\e[M\e[L", s) && !occursin("\e[1H", s)
+    @test_throws ArgumentError frame_bytes(rows3; region = :mine)
+    # Under the cursor: up over what the last frame left, never a line number,
+    # a newline between rows, and the cursor left under the frame with what a
+    # taller one left below it cleared.
+    s = String(frame_bytes(rows3; inline = 3))
+    @test occursin("\e[3A\r\e[2Kone", s) && !occursin(r"\e\[\d+(;\d+)?H", s)
+    @test occursin("\r\n\e[2Ktwo", s) && occursin("three     \r\n\e[J", s)
+    @test !occursin("\e[r", s)
+    @test !occursin("A", String(frame_bytes(rows3; inline = 0)))
+    # No rows is the last frame taken off, and the cursor where it began.
+    @test occursin("\e[2A\r\e[J", String(frame_bytes(String[]; inline = 2)))
+    # A caret on its row: up from under the frame, and to its column.
+    s = String(frame_bytes(rows3, "", (2, 7); inline = 0))
+    @test occursin("\e[J\e[?7h\e[2A\e[7G\e[?25h", s)
+end
+
+@testset "a row written where the cursor is" begin
+    isdefined(Base, :ispublic) && @test Base.ispublic(TermInput, :writerow)
+    io = IOBuffer()
+    TermInput.writerow(IOContext(io, :color => true),
+                       rowcat("ab", verbatim("\e[31mXY", 2), faced("c", Face(weight = :bold))))
+    @test String(take!(io)) == "ab\e[31mXY\e[0m\e[5G\e[1mc\e[22m"
+end
+
+@testset "a widget at its own height" begin
+    li = LineInput("Name", "who to greet")
+    rs = render(li, 40)
+    @test !isempty(rs) && all(r -> !isempty(strip(r)), rs)
+    @test all(r -> rowwidth(r) == 40, rs)
+    # The same rows as the screen's, with the blank ones round them gone, and
+    # the caret moved up with them.
+    tall = render(li, 40, 30)
+    a = findfirst(r -> !isempty(strip(r)), tall)
+    @test tall[a:a+length(rs)-1] == rs
+    @test caret(li, 40) == caret(li, 40, 30) .- (a - 1, 0)
+    # A choice is every option, and a text area every line written.
+    c = Choice("Pick", "", string.(1:40))
+    @test length(render(c, 60)) == 1 + 1 + 40 + 2         # head, query, options, foot, hint
+    @test caret(c, 60) == (2, 7)
+    ta = TextArea("Say", ""; initial = join(string.(1:20), "\n"))
+    @test length(render(ta, 60)) == 3 + 20 + 2            # head, note, blank, lines, ...
+    @test length(render(TextArea("Say"), 60)) == 3 + 3 + 2
+    @test caret(ta, 60) == (3 + 20, 2 + 2 + 3)
+    @test caret(Confirm("Sure?", ""), 60) === nothing
+    @test length(render(Confirm("Sure?", ""), 60)) == 3
+    # A click lands where the rows are, with none above them: the options
+    # start on the third.
+    render(c, 60)
+    @test click!(c, :press, 10, 6, 1.0) === :ok && selected(c) == 4
+end
+
+@testset "a title keeps its faces" begin
+    red = Face(foreground = SimpleColor(:red))
+    hasred(r) = any(a -> TermInput.annlabel(a) === :face && TermInput.annvalue(a) == red,
+                    StyledStrings.annotations(r))
+    t = rowcat("Gimme a ", faced("number", red))
+    for v in (LineInput(t), TextArea(t), Choice(t, "", ["a", "b"]), Confirm(t, ""))
+        @test String(v.title) == "Gimme a number"
+        @test count(hasred, render(v, 60, 12)) == 1
+    end
+    # Under the title's weight: bold and red both, on the same word.
+    @test occursin("\e[1mGimme a \e[31mnumber", ansi(render(LineInput(t), 60)[2]))
+end
+
+@testset "a choice with no query is a menu" begin
+    c = Choice("Pick", "", ["one", "two", "three"]; filter = false)
+    @test handle!(c, Int('q')) === :unhandled
+    @test handle!(c, 127) === :unhandled && handle!(c, K_LEFT) === :unhandled
+    @test handle!(c, K_DOWN) === :ok && selected(c) == 2
+    @test query(c) == "" && matches(c) == [1, 2, 3]
+    @test paste!(c, "tw") === c && query(c) == ""
+    # No query row, so nowhere for the cursor - and one row shorter.
+    @test caret(c, 60) === nothing
+    @test length(render(c, 60)) == length(render(Choice("Pick", "", ["one", "two", "three"]), 60)) - 1
+    @test !any(r -> occursin("/ ", r), render(c, 60))
+    render(c, 60)
+    @test click!(c, :press, 10, 4, 1.0) === :ok && selected(c) == 3
+    # Laid out in a row: ←/→ move it, and ↑/↓ still do.
+    h = Choice("Pick", "", ["one", "two", "three"]; horizontal = true, filter = false)
+    @test handle!(h, K_RIGHT) === :ok && selected(h) == 2
+    @test handle!(h, K_RIGHT) === :ok && handle!(h, K_RIGHT) === :ok && selected(h) == 3
+    @test handle!(h, K_LEFT) === :ok && selected(h) == 2
+    @test handle!(h, K_UP) === :ok && selected(h) == 1
+    # Filtered and in a row, ←/→ move the cursor rather than the query's.
+    f = Choice("Pick", "", ["one", "two"]; horizontal = true)
+    handle!(f, Int('o'))
+    @test handle!(f, K_RIGHT) === :ok && query(f) == "o" && selected(f) == 2
+end
+
+@testset "a choice starts on an option, and is moved to one" begin
+    c = Choice("Again?", "", ["yes", "no", "maybe"]; selected = 2)
+    @test selected(c) == 2 && picked(c, 13) == 2
+    @test selected(Choice("x", "", ["a", "b"]; selected = 9)) == 2
+    @test selected(Choice("x", "", ["a", "b"]; selected = -1)) == 1
+    @test selected(Choice("x", "", String[]; selected = 3)) == 0
+    c = Choice("Again?", "", ["yes", "no", "maybe"])
+    @test TermInput.select!(c, 3) === c && selected(c) == 3
+    # Through the query: by label, not by row; and one the query hides clears it.
+    query!(c, "y")
+    @test matches(c) == [1, 3]
+    TermInput.select!(c, 3)
+    @test selected(c) == 3 && query(c) == "y"
+    TermInput.select!(c, 2)
+    @test selected(c) == 2 && query(c) == ""
+    r = Choice("x", "", ["a", "b", "c"]; ranged = true)
+    handle!(r, K_SDOWN)
+    @test TermInput.chosen(r) == [1, 2]
+    TermInput.select!(r, 3)
+    @test TermInput.chosen(r) == [3]
+end
+
+@testset "the block a field's cursor is drawn as" begin
+    isdefined(Base, :ispublic) && @test Base.ispublic(TermInput, :drawcursor)
+    @test ansi(drawcursor("abc", 2)) == "a\e[7mb\e[27mc"
+    @test ansi(drawcursor("abc", 4)) == "abc\e[7m \e[27m"
+    @test ansi(drawcursor("ab", 3, Face(background = SimpleColor(:white)))) == "ab\e[47m \e[49m"
+end
+
+@testset "markdown, with a host's choices" begin
+    import Markdown
+    import TermInput: MarkdownStyle
+    texts(rs) = [String(r.text) for r in rs]
+    L = Face(weight = :light)
+    md = Markdown.parse("see [the docs](https://example.org) now")
+    @test texts(markdown_rows(md, 60; pad = false)) == ["see the docs now"]
+    rs = markdown_rows(md, 60; style = MarkdownStyle(url = L), pad = false)
+    @test texts(rs) == ["see the docs (https://example.org) now"]
+    @test occursin("\e[2m(https://example.org)\e[22m", ansi(rs[1].text))
+    # Unpadded: each row its own width, and never wider than asked.
+    @test rowwidth(only(markdown_rows(Markdown.parse("short"), 40; pad = false)).text) == 5
+    @test all(r -> rowwidth(r.text) <= 10,
+              markdown_rows(Markdown.parse("a b c d e f g h i j k l m"), 10; pad = false))
+    # Footnotes as the style refers to them, in the text and at the definition.
+    md = Markdown.parse("a[^1] b\n\n[^1]: the note")
+    @test occursin("[^1]", markdown_rows(md, 40)[1].text)
+    rs = markdown_rows(md, 40; style = MarkdownStyle(footnote_ref = "[%s]"), pad = false)
+    @test texts(rs) == ["a[1] b", "", "[1]: the note"]
+    # A list's marks by depth, round again, in the marker's face.
+    md = Markdown.parse("* a\n    * b\n        * c\n            * d")
+    st = MarkdownStyle(bullets = ("- ", "+ ", "* "), marker = L)
+    @test texts(markdown_rows(md, 40; style = st, pad = false)) == ["- a", "  + b", "    * c", "      - d"]
+    @test startswith(ansi(markdown_rows(md, 40; style = st)[1].text), "\e[2m- \e[22ma")
+    @test startswith(markdown_rows(md, 40)[2].text, "  • b")
+    @test texts(markdown_rows(Markdown.parse("3. x\n4. y"), 9; style = st, pad = false)) == ["3. x", "4. y"]
+    @test startswith(ansi(markdown_rows(Markdown.parse("1. x"), 9;
+                                        style = MarkdownStyle(number = L))[1].text), "\e[2m1. \e[22mx")
+    st = MarkdownStyle(numbers = "  %s) ")
+    @test texts(markdown_rows(Markdown.parse("9. x\n10. y"), 12; style = st, pad = false)) ==
+          ["   9) x", "  10) y"]
+    if VERSION >= v"1.12"
+        B = Face(weight = :bold)
+        md = Markdown.parse("a `function f end` b")
+        rs = markdown_rows(md, 40; style = MarkdownStyle(faces = Dict(:keyword => B), inlinecode = true))
+        @test texts(rs) == [rpad("a `function f end` b", 40)]
+        @test occursin("\e[1mfunction\e[22m", ansi(rs[1].text))
+        @test !occursin("\e[1m", ansi(markdown_rows(md, 40; style = MarkdownStyle(faces = Dict(:keyword => B)))[1].text))
+    end
+end
+
+@testset "rows padded, stripped and cut with a mark of the host's" begin
+    import TermInput: row
+    @test rowfit("abcdefgh", 6; mark = "...") == "abc..."
+    @test rowfit("ab cdefgh", 7; word = true) == "ab…"
+    @test rowfit("abcdefgh", 6; word = true) == "abcde…"     # no space: mid-word
+    @test rowfit("abcdefgh", 2; mark = "...") == ".."
+    @test rowfit("abc", 3; mark = "...") == "abc"
+    B = Face(weight = :bold)
+    @test ansi(rowfit(faced("abcdefgh", B), 6; mark = "...")) == "\e[1mabc...\e[22m"
+    @test TermInput.rowrstrip(row("ab  ")) == "ab"
+    @test TermInput.rowrstrip(rowcat("ab", faced("  ", B))) == "ab"
+    @test TermInput.rowrstrip("   ") == ""
+    @test ansi(TermInput.rowrstrip(rowcat(faced("ab", B), " "))) == "\e[1mab\e[22m"
+    pv(rs) = [String(r) for r in rs]
+    @test pv(TermInput.rowvpad([row("a")], 1, 3, :center)) == [" ", "a", " "]
+    @test pv(TermInput.rowvpad([row("a")], 2, 4, :center)) == ["  ", "a", "  ", "  "]
+    @test pv(TermInput.rowvpad([row("a")], 1, 3)) == ["a", " ", " "]
+    @test pv(TermInput.rowvpad([row("a")], 1, 2, :bottom)) == [" ", "a"]
+    @test pv(TermInput.rowvpad(["a", "b"], 1, 1)) == ["a", "b"]
+end
+
+@testset "boxes with a footer, by Term's names" begin
+    @test fieldnames(Box) == (:name, :top, :head, :head_row, :mid, :row, :foot_row, :foot, :bottom)
+    @test all(n -> haskey(BOXES, n), (:NONE, :ASCII, :ASCII2, :ASCII_DOUBLE_HEAD, :SQUARE,
+        :SQUARE_DOUBLE_HEAD, :MINIMAL, :MINIMAL_HEAVY_HEAD, :MINIMAL_DOUBLE_HEAD, :SIMPLE,
+        :SIMPLE_HEAD, :SIMPLE_HEAVY, :HORIZONTALS, :ROUNDED, :HEAVY, :HEAVY_EDGE, :HEAVY_HEAD,
+        :DOUBLE, :DOUBLE_EDGE))
+    @test all(b -> b.name in keys(BOXES) && BOXES[b.name] === b, BOXES)
+    # Six lines are a box whose footer is its body's; eight say so.
+    b = Box(:SIX, "╭─┬╮\n│ ││\n├─┼┤\n│ ││\n├─┼┤\n╰─┴╯")
+    @test b.foot_row == b.row && b.foot == b.mid
+    b = Box(:EIGHT, "╭─┬╮\n│ ││\n├─┼┤\n│ ││\n├─┼┤\n╞═╪╡\n│ ││\n╰─┴╯\n")
+    @test b.foot_row == BoxLine("╞═╪╡") && b.bottom == BoxLine("╰─┴╯")
+    @test_throws ArgumentError Box(:FIVE, "a\nb\nc\nd\ne")
+    @test BOXES.HEAVY_HEAD.head_row == BoxLine("┡━╇┩")
+end
+
+@testset "a table of cells, outside markdown" begin
+    import TermInput: tablerows
+    pv(rs) = [String(r) for r in rs]
+    cells = ["1" "one"; "22" "two\nlines"]
+    @test pv(tablerows(cells; header = ["n", "word"])) == [
+        "╭────┬───────╮",
+        "│ n  │ word  │",
+        "├────┼───────┤",
+        "│ 1  │ one   │",
+        "├────┼───────┤",
+        "│ 22 │ two   │",
+        "│    │ lines │",
+        "╰────┴───────╯"]
+    # Justified, padded, ruled always, a footer under its own rule, valign.
+    rs = tablerows(cells; footer = ["Σ", "2"], justify = [:right, :center], pad = 2,
+                   rules = :never, valign = :bottom, box = BOXES.HEAVY_HEAD)
+    @test pv(rs) == [
+        "┏━━━━━━┳━━━━━━━━━┓",
+        "│   1  │   one   │",
+        "│      │   two   │",
+        "│  22  │  lines  │",
+        "├──────┼─────────┤",
+        "│   Σ  │    2    │",
+        "└──────┴─────────┘"]
+    # Fitted to a width: the widest column narrowed, its cell wrapped.
+    rs = tablerows(["k" "word word word word"], 17)
+    @test all(r -> rowwidth(r) == 17, rs)
+    @test pv(rs)[2:3] == ["│ k │ word word │", "│   │ word word │"]
+    # Widths given; a cell already laid out is cut, never wrapped; `wrap =
+    # false` cuts a string's lines too.
+    rs = tablerows(reshape(Any[["a long row", "b"]], 1, 1); widths = 4)
+    @test pv(rs)[2:3] == ["│ a l… │", "│ b    │"]
+    @test pv(tablerows(["a long row";;]; widths = 4, wrap = false))[2] == "│ a l… │"
+    # Faces: the cell and its padding, never the blanks that make it as tall
+    # as its row; the box in its own.
+    B, Y = Face(weight = :bold), Face(foreground = SimpleColor(:yellow))
+    rs = tablerows(["a" "b\nc"]; faces = [B, Face()], rule = Y)
+    faceson(r, f) = [TermInput.annregion(a) for a in StyledStrings.annotations(r)
+                     if TermInput.annvalue(a) == f]
+    @test faceson(rs[2], B) == [4:6]                     # " a ", after a 3-byte bar
+    @test faceson(rs[3], B) == []
+    @test length(faceson(rs[2], Y)) == 3 && pv(rs)[3] == "│   │ c │"
+    # A rule of the host's between each two; vpad; no edges.
+    rs = tablerows(["a"; "b"; "c";;]; rules = [BOXES.ROUNDED.foot_row, nothing],
+                   vpad = [0, 1, 0], valign = :center, top = false, bottom = false,
+                   box = BOXES.ASCII)
+    @test pv(rs) == ["| a |", "├───┤", "|   |", "| b |", "|   |", "| c |"]
 end
 
 end # testset TermInput

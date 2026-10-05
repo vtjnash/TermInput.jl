@@ -61,6 +61,7 @@ embeds one.
   * `lineinput.jl` `LineInput`, one line in a box
   * `choice.jl`    `Choice`, one of a list narrowed by typing, and `Confirm`,
                    a question only named keys answer
+  * `table.jl`     `tablerows`: cells of rows in columns, in a box
   * `markdown.jl`  `markdown_rows`: a parsed `Markdown.MD` as rows of exactly
                    `w` columns, each knowing the line it came from
 
@@ -106,16 +107,17 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
 # wanted. `public` is 1.11's, so it is parsed only where it exists.
 @static if VERSION >= v"1.11.0-DEV.469"
     eval(Meta.parse("""public render, caret, field, handle!, text, paste!, click!, column,
-        query, query!, selected, chosen, matches, doubled, DOUBLECLICK, WHEEL_ROWS, ACTIONS,
-        oneline, notetext, drawfield, bufferrows, settext!, curline, move!,
+        query, query!, selected, select!, chosen, matches, doubled, DOUBLECLICK, WHEEL_ROWS,
+        ACTIONS, oneline, notetext, drawfield, drawcursor, writerow, bufferrows, settext!,
+        curline, move!,
         newline!, insertblock!, backspace!, deletechar!, killline!,
         killtostart!, deleteword!, killwordforward!, kill!, yank!, transpose!,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
         DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, codemime,
         highlighted_lines,
         BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal,
-        Row, row, rowhead, rowtail, rowlines, rowwraplines, overlaid, linked,
-        verbatim, wrapspans"""))
+        Row, row, rowhead, rowtail, rowlines, rowwraplines, rowrstrip, rowvpad, overlaid,
+        linked, verbatim, wrapspans, tablerows"""))
 end
 
 include("rows.jl")
@@ -133,15 +135,23 @@ include("scroll.jl")
 include("textarea.jl")
 include("lineinput.jl")
 include("choice.jl")
+include("table.jl")
 include("markdown.jl")
 
 """
     render(widget, w, h) -> Vector{Row}
+    render(widget, w) -> Vector{Row}
 
 The whole frame: `h` rows of exactly `w` display columns, each a [`Row`](@ref)
 in the faces of [`CHROME`](@ref), for [`frame_bytes`](@ref) to write. Pure -
 the same widget and the same size give the same rows - bar that a `Choice`
 notes where it put its rows, for [`click!`](@ref).
+
+Without `h`, the widget at its own height: the box and the hint under it and
+no blank rows round them, each row still `w` columns - for a widget drawn
+under the cursor rather than on a screen of its own (`frame_bytes(rows;
+inline = n)`). Its own height is every option of a `Choice` and every line
+written in a `TextArea`, so a host with a screen to fit gives `h`.
 
 Public and not exported, because `render` is a name a host is likely to have
 already; `import TermInput: render` where it is not.
@@ -150,10 +160,12 @@ render
 
 """
     caret(widget, w, h) -> Union{Nothing, Tuple{Int,Int}}
+    caret(widget, w) -> Union{Nothing, Tuple{Int,Int}}
 
-Where the terminal's own cursor goes in the frame `render(widget, w, h)` draws:
-1-based `(row, col)`, for [`frame_bytes`](@ref) to put it and show it, or
-`nothing` when the widget has nowhere for typing to go - a `Confirm`, or a
+Where the terminal's own cursor goes in the frame `render(widget, w, h)` draws -
+or `render(widget, w)`, without `h`: 1-based `(row, col)`, for
+[`frame_bytes`](@ref) to put it and show it, or `nothing` when the widget has
+nowhere for typing to go - a `Confirm`, a `Choice` with no `filter`, or a
 `TextArea` that is not `focused`.
 
     write(stdout, frame_bytes(render(ta, w, h), "", caret(ta, w, h)))

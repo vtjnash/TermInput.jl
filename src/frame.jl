@@ -4,26 +4,41 @@
 # knows nothing about what is in them - every rule here is about a terminal.
 
 """
-    frame_bytes(rows, title = "", cursor = nothing; h = 0) -> Vector{UInt8}
+    frame_bytes(rows, title = "", cursor = nothing; h = 0, top = 1, region = :reset,
+                inline = nothing) -> Vector{UInt8}
 
-One full-screen frame - `render`'s rows, top to bottom - as the bytes the
-terminal is sent, in one write. `title` goes after the rows as it is (an
-`OSC 2` the host built, or `""`), and `cursor`, a 1-based `(row, col)`, is
-where the terminal's own cursor is put and shown; `nothing` leaves it hidden,
-for a frame that draws its own. `h` is the screen's height, and rows the frame
-did not bring, up to it, are cleared too; `0` is the frame's own.
+One frame - `render`'s rows, top to bottom - as the bytes the terminal is sent,
+in one write. `title` goes after the rows as it is (an `OSC 2` the host built,
+or `""`), and `cursor`, a 1-based `(row, col)` in the frame, is where the
+terminal's own cursor is put and shown; `nothing` leaves it hidden, for a frame
+that draws its own. `h` is how many lines the frame owns, and rows the frame did
+not bring, up to it, are cleared too; `0` is the frame's own.
+
+Where it goes is one of three:
+
+  * **The screen**, the default: rows written from line `top`, which is `1` for
+    a full-screen frame, and the scroll region reset first.
+  * **A strip of it**, with `region = :keep`: rows from line `top` and the
+    scroll region left as the host set it - a status strip pinned under output
+    that goes on scrolling above it. A line outside the region is one a delete
+    or an insert does nothing on, so each row's line is erased (`\\e[2K`)
+    rather than deleted and put back; see below for what that costs.
+  * **Under the cursor**, with `inline = n`: no line numbers at all. The cursor
+    goes up `n` lines and the frame is written from the start of that line, a
+    newline between rows, so a frame taller than what is left of the screen
+    scrolls it; and it is left under the frame, at the start of the line after
+    it, with everything below that cleared. `n` is what the last frame left
+    above the cursor's line: `0` for the first, its row count after one drawn
+    with no `cursor`, and `cursor[1] - 1` after one that put it - the frame is
+    a function of its arguments, so remembering which is the host's. A prompt
+    asked in the middle of a program's output draws this way, and no rows at
+    all is the last frame taken off. The scroll region is never touched,
+    since resetting it moves the cursor.
 
 A row is a [`Row`](@ref), written by StyledStrings in its faces - whatever the
 stream, since what turns colour on is the faces a host put there, and a row
-with none writes no escape at all - or a `String`, written as it is.
-
-A `:verbatim` piece of a row ([`verbatim`](@ref)) is written as it is, with a
-reset after it, since what it opened is its own and the row goes on; then the
-cursor is moved to the column after its width, and the rest of the row is
-written from there. Nothing measures what the piece drew: a program's row as
-its multiplexer gave it keeps its trailing spaces only up to the last cell
-written, and is narrower than its pane - which the row just deleted is already
-blank under.
+with none writes no escape at all - or a `String`, written as it is; see
+[`writerow`](@ref) for a verbatim piece of one.
 
 Three things about the write, none of them about what is in the frame:
 
@@ -43,7 +58,8 @@ Three things about the write, none of them about what is in the frame:
     is four kilobytes on Linux, so a frame is several reads however it was
     written.
 
-**Every row is its line deleted and written again**: `\\e[M` at that row, which
+**On the screen, every row is its line deleted and written again**: `\\e[M` at
+that row, which
 takes the line out and pulls the ones below it up, and `\\e[L` there, which puts
 a blank line back and pushes them down again, so the row is written on a blank
 line and every other line is where it was. A hyperlink leaves a marker on the
@@ -57,7 +73,10 @@ host, and a pty host that misses its heartbeat for 12 s is restarted with every
 terminal in it - which was quitting a full-screen program over Remote-SSH. An
 `id` on the link only bounds it by url and row, which a scrolled page outgrows;
 a delete bounds it by what is on the screen. One row at a time, and never a
-clear, which is a blank frame and a flicker on every key.
+clear, which is a blank frame and a flicker on every key. A strip or an inline
+frame erases instead, and is the host's to keep short of links: it is not the
+alternate screen, whose lines are never trimmed, and a line it cannot know is
+in the scroll region is one a delete would not touch.
 
 **Not a scroll region of the one row.** A region is two lines at the least, by
 DEC's definition of it, and tmux ignores one a line tall (3.5, 2026-09-30), so the
@@ -81,22 +100,59 @@ took the right border off every row. Nothing is erased after a row regardless,
 and each row starts by putting the cursor at its line.
 """
 function frame_bytes(rows::AbstractVector{<:AbstractString}, title::AbstractString = "",
-                     cur::Union{Nothing,Tuple{Int,Int}} = nothing; h::Int = 0)
+                     cur::Union{Nothing,Tuple{Int,Int}} = nothing; h::Int = 0,
+                     top::Int = 1, region::Symbol = :reset,
+                     inline::Union{Nothing,Int} = nothing)
+    region in (:reset, :keep) ||
+        throw(ArgumentError("region is :reset or :keep, not $(repr(region))"))
     io = IOBuffer()
     cio = IOContext(io, :color => true)
-    print(io, "\e[?2026h\e[?25l\e[?7l\e[r")
-    for i in 1:max(h, length(rows))
-        print(io, "\e[", i, "H\e[M\e[L")
-        i <= length(rows) && writerow(cio, rows[i])
+    print(io, "\e[?2026h\e[?25l\e[?7l")
+    n = max(h, length(rows))
+    if inline !== nothing
+        inline > 0 && print(io, "\e[", inline, "A")
+        print(io, "\r")
+        for i in 1:n
+            print(io, i == 1 ? "\e[2K" : "\r\n\e[2K")
+            i <= length(rows) && writerow(cio, rows[i])
+        end
+        # Under the frame, and nothing of a taller one before it left there.
+        n > 0 && print(io, "\r\n")
+        print(io, "\e[J\e[?7h", title)
+        if cur !== nothing
+            up = n - cur[1] + (n > 0)
+            up > 0 && print(io, "\e[", up, "A")
+            print(io, "\e[", cur[2], "G\e[?25h")
+        end
+    else
+        region === :reset && print(io, "\e[r")
+        for i in 1:n
+            print(io, "\e[", top + i - 1, region === :reset ? "H\e[M\e[L" : "H\e[2K")
+            i <= length(rows) && writerow(cio, rows[i])
+        end
+        print(io, "\e[?7h", title)
+        cur === nothing || print(io, "\e[", top + cur[1] - 1, ";", cur[2], "H\e[?25h")
     end
-    print(io, "\e[?7h", title)
-    cur === nothing || print(io, "\e[", cur[1], ";", cur[2], "H\e[?25h")
     print(io, "\e[?2026l")
     take!(io)
 end
 
-"""One row onto a frame: its faces by StyledStrings, and each verbatim piece
-as it is, closed, with the cursor moved past its width."""
+"""
+    writerow(io, row)
+
+One row onto `io` where the cursor is, as [`frame_bytes`](@ref) writes each of
+its rows: its faces by StyledStrings, and each `:verbatim` piece
+([`verbatim`](@ref)) as it is, with a reset after it, since what it opened is
+its own and the row goes on; then the cursor is moved to the column after its
+width, and the rest of the row is written from there. For a host that places
+its rows itself. `io` decides colour as anywhere else - an `IOContext` with
+`:color => true` for the faces to be written.
+
+Nothing measures what a verbatim piece drew: a program's row as its multiplexer
+gave it keeps its trailing spaces only up to the last cell written, and is
+narrower than its pane - which a line erased or deleted first is already blank
+under.
+"""
 writerow(io::IO, s::AbstractString) = (print(io, s); nothing)
 writerow(io::IO, s::SubString{<:AnnotatedString}) = writerow(io, row(s))
 function writerow(io::IO, s::AnnotatedString)
