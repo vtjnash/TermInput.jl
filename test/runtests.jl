@@ -870,6 +870,12 @@ end
     @test chosen(r) == [2]
     handle!(n, K_SDOWN)
     @test chosen(n) == [2]
+    # A run lit from the start - the pick kept from last time - which `↵`
+    # alone then takes; an unranged list has no run to light.
+    k = Choice("t", "", ["a", "b", "c", "d"]; ranged = true, selected = 3, anchor = 2)
+    @test chosen(k) == [2, 3] && selected(k) == 3
+    @test handle!(k, 13) === :unhandled && chosen(k) == [2, 3]
+    @test chosen(Choice("t", "", ["a", "b"]; selected = 2, anchor = 1)) == [2]
     # The default hint names only the keys the widget owns: picking and
     # escape come back, so saying what they do is the host's.
     @test occursin(CHOICE_HINT, screen(render(n, 80, 24)))

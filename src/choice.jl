@@ -121,7 +121,7 @@ const CHOICE_HINT = "↑/↓ move · type to narrow"
 
 """
     Choice(title, note, labels; numbered = false, ranged = false, filter = true,
-           horizontal = false, selected = 1, hint = CHOICE_HINT,
+           horizontal = false, selected = 1, anchor = 0, hint = CHOICE_HINT,
            maxwidth = DIALOG_WIDTH)
 
 A list of `labels` titled `title` - a string, or a [`Row`](@ref) whose faces are
@@ -137,18 +137,25 @@ or a vector of rows, see [`notetext`](@ref) - drawn quietly under the title.
                  in a row
   * `selected`   the option the cursor starts on, an index into `labels` -
                  a default answer, which `↵` alone then takes
+  * `anchor`     in a `ranged` list, the other end of a run lit from the
+                 start, `anchor` to `selected` - a default that is a run, the
+                 one picked last time, say - and 0 for none
   * `hint`       the key hints under the box, which a host that binds `↵` and
                  escape - every host - adds to
   * `maxwidth`   the widest the box is drawn, however wide the screen
 """
 function Choice(title, note, labels::AbstractVector; numbered::Bool = false,
                 ranged::Bool = false, filter::Bool = true, horizontal::Bool = false,
-                selected::Int = 1, hint::AbstractString = CHOICE_HINT,
+                selected::Int = 1, anchor::Int = 0, hint::AbstractString = CHOICE_HINT,
                 maxwidth::Int = DIALOG_WIDTH)
     c = Choice(row(title), notetext(note), Row[row(l) for l in labels],
                LineInput(""), 1, 1, numbered, ranged, filter, horizontal, 0, "",
                String(hint), maxwidth, 1:0, 1:0, Int[], (0.0, 0, 0))
     select!(c, selected)
+    # Nothing is hidden yet, so a position in `labels` is one in `matches`.
+    (ranged && anchor != 0 && !isempty(labels)) &&
+        (c.anchor = clamp(anchor, 1, length(labels)))
+    c
 end
 
 """
