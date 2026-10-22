@@ -238,7 +238,7 @@ instead.
 |---|---|---|
 | `^b` `^f` | backward-char, forward-char | ✅ and the arrows |
 | `^p` `^n` | previous-history, next-history | ✅ `TextArea` only, as previous-line / next-line, and so are `↑`/`↓`. A `LineInput` has no second line to reach and no history to walk, so all four come back. A `Choice` moves its cursor with them |
-| `^a` `^e` | beginning-of-line, end-of-line | ✅ and Home / End |
+| `^a` `^e` | beginning-of-line, end-of-line | ✅ and Home / End. In a `TextArea`, `^a` pressed at the front of its line goes on to the front of the text, and `^e` at the end of its line to the end of it - the Julia REPL's rule for a repeated `^a`, read off the cursor instead. Home and End stay on the line, where readline has them; the REPL sends those to the input's ends |
 | `⌥b` `⌥f` | backward-word, forward-word | ✅ and ctrl-arrows |
 | `^d` | delete-char | ✅ and Delete. Not end-of-file on an empty buffer - leaving is the host's |
 | `⌫` | backward-delete-char | ✅ |

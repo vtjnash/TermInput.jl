@@ -329,9 +329,18 @@ function handle!(v::TextArea, k::Int; suspend::F = f -> f()) where {F}
     elseif k == K_WORD_RIGHT
         move!(b, :wordright)
     elseif k in (C_A, K_HOME)
-        move!(b, :home)
+        # `^a` at the front of its line has nothing nearer to go to, and so
+        # goes to the front of the text; `^e` at the end of its line likewise
+        # to the end of it. Once is the line and twice the whole buffer, as
+        # Julia's REPL has it (`move_line_start`, on a repeated key) - read
+        # off the cursor here rather than the key before, so a cursor that
+        # arrived at the front by any road is one press from the top. Home
+        # and End stay the line's, as readline names them; the REPL sends
+        # those to the input's ends, and here one key each is left that
+        # never leaves the line.
+        move!(b, k == C_A && b.col == 1 ? :bufstart : :home)
     elseif k in (C_E, K_END)
-        move!(b, :end)
+        move!(b, k == C_E && b.col > length(curline(b)) ? :bufend : :end)
     elseif k in (K_LEFT, C_B)
         move!(b, :left)
     elseif k in (K_RIGHT, C_F)

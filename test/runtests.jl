@@ -692,6 +692,19 @@ end
     handle!(r, K_WORD_RIGHT);  @test r.buf.col == 6
     handle!(r, C_A); handle!(r, C_D)
     @test text(r) == "lpha "
+    # `^a` at the front of a line is the front of the text, and `^e` at the
+    # end of one the end of it; Home and End stay on their line.
+    m = TextArea("t"; initial = "one\ntwo\nthree")
+    @test m.buf.row == 3 && m.buf.col == 6
+    handle!(m, C_A);     @test (m.buf.row, m.buf.col) == (3, 1)
+    handle!(m, C_A);     @test (m.buf.row, m.buf.col) == (1, 1)
+    handle!(m, C_E);     @test (m.buf.row, m.buf.col) == (1, 4)
+    handle!(m, C_E);     @test (m.buf.row, m.buf.col) == (3, 6)
+    handle!(m, K_UP);    @test m.buf.row == 2
+    handle!(m, K_HOME);  @test (m.buf.row, m.buf.col) == (2, 1)
+    handle!(m, K_HOME);  @test (m.buf.row, m.buf.col) == (2, 1)
+    handle!(m, K_END);   @test (m.buf.row, m.buf.col) == (2, 4)
+    handle!(m, K_END);   @test (m.buf.row, m.buf.col) == (2, 4)
     # Shift-arrows are the arrows here: there is no selection to extend.
     handle!(r, K_SDOWN)
     @test r.buf.row == 1
