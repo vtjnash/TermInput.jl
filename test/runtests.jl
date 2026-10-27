@@ -1393,6 +1393,26 @@ end
     @test text(e) == "keep this"
     @test !isempty(e.status)
 
+    # The host names the file when it knows what the text is, and the editor
+    # reads the kind of text from that name - vim matches the basename and
+    # nothing else - so the name has to arrive whole. Unnamed, it is a `.md`.
+    seen = Ref("")
+    InteractiveUtils.define_editor("terminput_naming_editor"; wait = true) do cmd, path, line, column
+        seen[] = path
+        `$(Base.julia_cmd()) -e ""`
+    end
+    m = TextArea("t"; initial = "merge", filename = "MERGE_MSG")
+    aseditor("terminput_naming_editor") do
+        handle!(m, K_EDIT)
+    end
+    @test basename(seen[]) == "MERGE_MSG"
+    @test !ispath(dirname(seen[]))           # its directory went with it
+    u = TextArea("t"; initial = "comment")
+    aseditor("terminput_naming_editor") do
+        handle!(u, K_EDIT)
+    end
+    @test endswith(seen[], ".md") && !isfile(seen[])
+
     # An editor that returns without writing is reported too, rather than
     # silently submitting what went in - `code` without `--wait` is the case,
     # and it is not obvious from the screen that nothing was edited.

@@ -468,7 +468,7 @@ own to - and a `maxwidth`, `DIALOG_WIDTH` but for the `TextArea`.
 
 | | |
 |---|---|
-| `TextArea(title, note = ""; initial, hint, maxwidth, focused)` | the composer, `TEXTAREA_HINT` and 100 columns by default |
+| `TextArea(title, note = ""; initial, hint, maxwidth, focused, filename)` | the composer, `TEXTAREA_HINT` and 100 columns by default; `filename` names the file `$EDITOR` is handed, when the host knows what kind of text it is |
 | `handle!(ta, k; suspend)` | how the terminal is handed back while `$EDITOR` runs |
 | `LineInput(title, note = ""; initial, hint, maxwidth)` | one line in a box, `LINEINPUT_HINT` |
 | `Choice(title, note, labels; numbered, ranged, filter, horizontal, selected, anchor, hint, maxwidth)` | one of a list, narrowed by a `LineInput` at its head, `CHOICE_HINT`; `picked(c, k)` says which option `↵` or a digit picks, and `click!(c, kind, x, y, at; window)` is the mouse. With `filter = false` a menu, with no query and its letters the host's; `horizontal` moves it with `←`/`→`; `selected` and `select!(c, i)` put the cursor on an option, and `anchor` lights a run to it from the start |

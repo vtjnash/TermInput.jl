@@ -78,12 +78,19 @@ function suspend(f, term; mouse::Bool = false, paste::Bool = false)
 end
 
 """
-    compose_external(suspend, initial) -> (text, note)
+    compose_external(suspend, initial; filename = "") -> (text, note)
 
 Hand `initial` to `\$EDITOR` in a temporary file, and take back whatever comes
 out. `suspend` is a one-argument function that runs its argument with the
 terminal given back and returns what it returns - [`suspend`](@ref) bound to
 the host's own terminal, or anything else that does the same job.
+
+`filename` is what the temporary file is called, in a fresh directory of its
+own; empty, it is a `tempname` ending in `.md`. Editors read the kind of text
+from the name and nothing else - vim's `filetype.vim` matches the basename -
+so a host that knows the text is a git commit message says `MERGE_MSG` or
+`COMMIT_EDITMSG` and gets that filetype's wrapping, spelling and highlighting,
+and a host that does not know says nothing.
 
 `InteractiveUtils.edit` is used rather than spawning `\$EDITOR` directly, so that
 `JULIA_EDITOR` and the `define_editor` hooks apply and the editor that opens is
@@ -94,8 +101,8 @@ that: an empty string when there is nothing to say, and otherwise a line for a
 status bar. The text is never lost to it - a failed or instant edit gives back
 what went in.
 """
-function compose_external(suspend, initial::AbstractString)
-    path = string(tempname(), ".md")
+function compose_external(suspend, initial::AbstractString; filename::AbstractString = "")
+    path = isempty(filename) ? string(tempname(), ".md") : joinpath(mktempdir(), filename)
     write(path, initial)
     before = read(path, String)
     # The error is the block's value rather than assigned inside it: a local a
@@ -114,5 +121,6 @@ function compose_external(suspend, initial::AbstractString)
         before
     end
     rm(path; force = true)
+    isempty(filename) || rm(dirname(path); force = true, recursive = true)
     isempty(err) ? (txt, txt == before ? "editor made no change" : "") : (before, err)
 end

@@ -68,6 +68,7 @@ mutable struct TextArea
     hint::String
     maxwidth::Int            # the widest the box is drawn, however wide the screen
     focused::Bool            # does it have the keyboard? see `render`
+    filename::String         # what `\$EDITOR` is handed; "" for `compose_external`'s own
 end
 
 """
@@ -82,7 +83,7 @@ const TEXTAREA_HINT = "⌥e/^o \$EDITOR · ^w word · ^a/^e line · ^y yank"
 
 """
     TextArea(title, note = ""; initial = "", hint = TEXTAREA_HINT, maxwidth = 100,
-             focused = true)
+             focused = true, filename = "")
 
 A composer titled `title` - a string, or a [`Row`](@ref) whose faces are kept
 under the title's weight - with `note` - what it is about, a line or several:
@@ -101,15 +102,19 @@ title.
                else on the same screen: the widget then draws a block in
                reverse video where its cursor is, which says where typing will
                go when the keys come back without saying that they are here
+  * `filename` what the file handed to `\$EDITOR` is called, when the host
+               knows what kind of text this is - `MERGE_MSG` for a git merge
+               message, say, which is how an editor picks its filetype; see
+               [`compose_external`](@ref). Empty, and the file is a `.md`
 
 How the terminal is handed back while `\$EDITOR` runs is not the widget's: it is
 given with the key, to [`handle!`](@ref).
 """
 TextArea(title, note = ""; initial::AbstractString = "",
          hint::AbstractString = TEXTAREA_HINT, maxwidth::Int = 100,
-         focused::Bool = true) =
+         focused::Bool = true, filename::AbstractString = "") =
     TextArea(row(title), notetext(note), TextBuffer(initial), 1, "", String(hint),
-             maxwidth, focused)
+             maxwidth, focused, String(filename))
 
 text(v::TextArea) = text(v.buf)
 
@@ -303,7 +308,7 @@ function handle!(v::TextArea, k::Int; suspend::F = f -> f()) where {F}
     v.status = ""
     b = v.buf
     if k in (K_EDIT, C_O)                           # hand it to $EDITOR
-        (txt, note) = compose_external(suspend, text(b))
+        (txt, note) = compose_external(suspend, text(b); filename = v.filename)
         settext!(b, txt)
         v.status = note
     elseif k in (13, 10)
