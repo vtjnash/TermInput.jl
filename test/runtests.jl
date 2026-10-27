@@ -1395,7 +1395,8 @@ end
 
     # The host names the file when it knows what the text is, and the editor
     # reads the kind of text from that name - vim matches the basename and
-    # nothing else - so the name has to arrive whole. Unnamed, it is a `.md`.
+    # nothing else - so the name has to arrive whole. Unnamed, it is a plain
+    # `message`, with no suffix to claim a kind it may not be.
     seen = Ref("")
     InteractiveUtils.define_editor("terminput_naming_editor"; wait = true) do cmd, path, line, column
         seen[] = path
@@ -1411,7 +1412,7 @@ end
     aseditor("terminput_naming_editor") do
         handle!(u, K_EDIT)
     end
-    @test endswith(seen[], ".md") && !isfile(seen[])
+    @test basename(seen[]) == "message" && !ispath(dirname(seen[]))
 
     # An editor that returns without writing is reported too, rather than
     # silently submitting what went in - `code` without `--wait` is the case,
