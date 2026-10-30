@@ -394,6 +394,14 @@ multiplexer gave it: its width is never measured and nothing cuts or wraps
 inside it. They are exported, since a host laying a widget out beside
 something else has the same problem one step out.
 
+A tab in a row is one column, written as a space - what a `TextArea` draws one
+as. `textwidth` says a tab is no columns and a terminal moves it to its next
+stop, so a row measured one way and drawn the other is wider than its box.
+Where the stops are counted from is the host's to know - the start of a line
+of a diff, prefix and all - so a host that wants a tab to line text up draws
+it as its spaces before the row is made, as `markdown_rows` does in a code
+block; in prose it draws a tab as a space, as GitHub does.
+
 ## How this differs from `Term.Live`'s `InputBox`
 
 Term has a widget of its own, and the honest summary is that they are not the

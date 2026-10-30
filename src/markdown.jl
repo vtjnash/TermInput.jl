@@ -227,16 +227,22 @@ function emit(line::Line)
 end
 
 plaintext(line::Line) = join(r.text for r in line)
-runwidth(line::Line) = sum((textwidth(r.text) for r in line); init = 0)
+runwidth(line::Line) = sum((textcols(r.text) for r in line); init = 0)
 
 """Wrap a line of runs to rows `w` columns wide: at the last space that fits,
 or, where there is none - a url, a long identifier, or `hard` for code, which
 is never reflowed - at the last grapheme that fits. A space a row is broken at
-is dropped, and a row never starts with the spaces a soft break left."""
+is dropped, and a row never starts with the spaces a soft break left.
+
+A tab is a space here, as GitHub draws one outside a code block: whitespace,
+which HTML collapses. A code block has drawn its tabs as their stops already
+(`codelines`), and the line's text, which is the rows' `src`, keeps them -
+tab-separated columns pasted into a comment copy back out as they were."""
 function wraprun(line::Line, w::Int; hard::Bool = false)
     gs, gw, gr = String[], Int[], Int[]
     for (k, r) in enumerate(line), g in Base.Unicode.graphemes(r.text)
-        push!(gs, String(g)); push!(gw, textwidth(g)); push!(gr, k)
+        g = g == "\t" ? " " : String(g)
+        push!(gs, g); push!(gw, textwidth(g)); push!(gr, k)
     end
     spans = wrapspans(gw, Bool[g == " " for g in gs], w; hard)
     rows = Line[]

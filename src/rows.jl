@@ -7,7 +7,7 @@
 # and slicing an annotated string keeps the annotations over what is kept.
 #
 # What is left for this file is the measure. The text's width is `textwidth`
-# of it, except over a `:verbatim` range, which is text a terminal already
+# of it, a tab one column (`textcols`), except over a `:verbatim` range, which is text a terminal already
 # laid out - a hosted program's row, say, as its multiplexer gave it, escapes
 # and all - whose width is the value of the annotation and is never measured.
 # Nothing here cuts or wraps inside one: a row that has to be cut through it is
@@ -137,31 +137,42 @@ function verbatims(s::AnnotatedString)
 end
 verbatims(::AbstractString) = Tuple{UnitRange{Int},Int}[]
 
+"""A tab in a row is one column, drawn as a space - what a text area draws one
+as (`shown`). `textwidth('\\t')` is 0 and a terminal moves to its next stop,
+which is wherever the row happens to start plus up to eight: measured as
+nothing and drawn as that, a row with a tab in it pushed the frame's edge out.
+A stop is counted from somewhere, and only the caller knows where - the start
+of a diff's line, prefix and all, or nowhere, for prose, where a tab is
+whitespace like any other - so a caller that means one draws the spaces itself
+before the row gets here. What reaches the row is measured and drawn alike."""
+textcols(s::AbstractString) = textwidth(s) + count(==('\t'), s)
+
 """
     rowwidth(s) -> Int
 
-The columns `s` prints in: `textwidth` of its text, and a `:verbatim` range
-the width it says it is.
+The columns `s` prints in: `textwidth` of its text, a tab one, and a
+`:verbatim` range the width it says it is.
 """
-rowwidth(s::AbstractString) = textwidth(s)
+rowwidth(s::AbstractString) = textcols(s)
 function rowwidth(s::AnnotatedString)
     vs = verbatims(s)
     str = s.string
-    isempty(vs) && return textwidth(str)
+    isempty(vs) && return textcols(str)
     w, i = 0, 1
     for (r, vw) in vs
-        first(r) > i && (w += textwidth(SubString(str, i, prevind(str, first(r)))))
+        first(r) > i && (w += textcols(SubString(str, i, prevind(str, first(r)))))
         w += vw
         i = last(r) + 1
     end
-    i <= ncodeunits(str) && (w += textwidth(SubString(str, i)))
+    i <= ncodeunits(str) && (w += textcols(SubString(str, i)))
     w
 end
 
 # --- cells ------------------------------------------------------------------
 
 """A piece of a row that is never split: a grapheme, or a verbatim range. Its
-bytes, its columns, and whether it is a space a line may break at."""
+bytes, its columns, and whether it is a space a line may break at - a tab
+being one, as it is drawn."""
 struct Cell
     lo::Int
     hi::Int
@@ -185,7 +196,7 @@ function cells(s::AbstractString)
         stop = k <= length(vs) ? prevind(str, first(vs[k][1])) : n
         for g in Base.Unicode.graphemes(SubString(str, i, thisind(str, stop)))
             lo = g.offset + 1
-            push!(out, Cell(lo, g.offset + ncodeunits(g), textwidth(g), g == " "))
+            push!(out, Cell(lo, g.offset + ncodeunits(g), textcols(g), g == " " || g == "\t"))
         end
         i = nextind(str, thisind(str, stop))
     end

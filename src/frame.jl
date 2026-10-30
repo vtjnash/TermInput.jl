@@ -141,7 +141,8 @@ end
     writerow(io, row)
 
 One row onto `io` where the cursor is, as [`frame_bytes`](@ref) writes each of
-its rows: its faces by StyledStrings, and each `:verbatim` piece
+its rows: its faces by StyledStrings, a tab as the one space `rowwidth`
+counted it as, and each `:verbatim` piece
 ([`verbatim`](@ref)) as it is, with a reset after it, since what it opened is
 its own and the row goes on; then the cursor is moved to the column after its
 width, and the rest of the row is written from there. For a host that places
@@ -153,27 +154,32 @@ gave it keeps its trailing spaces only up to the last cell written, and is
 narrower than its pane - which a line erased or deleted first is already blank
 under.
 """
-writerow(io::IO, s::AbstractString) = (print(io, s); nothing)
+writerow(io::IO, s::AbstractString) = (print(io, replace(s, '\t' => ' ')); nothing)
 writerow(io::IO, s::SubString{<:AnnotatedString}) = writerow(io, row(s))
 function writerow(io::IO, s::AnnotatedString)
     x = row(s)
     vs = verbatims(x)
-    isempty(vs) && (print(io, x); return nothing)
+    isempty(vs) && (print(io, untabbed(x)); return nothing)
     str = x.string
     col, i = 1, 1
     for (r, vw) in vs
         if first(r) > i
             piece = slice(x, i, first(r) - 1)
-            print(io, piece); col += rowwidth(piece)
+            print(io, untabbed(piece)); col += rowwidth(piece)
         end
         print(io, SubString(str, first(r), thisind(str, last(r))), "\e[0m")
         col += vw
         print(io, "\e[", col, "G")
         i = last(r) + 1
     end
-    i <= ncodeunits(str) && print(io, slice(x, i, ncodeunits(str)))
+    i <= ncodeunits(str) && print(io, untabbed(slice(x, i, ncodeunits(str))))
     nothing
 end
+
+"""A row with each tab a space, as `rowwidth` measured it: one byte for one,
+so every face stays over what it was over. Never a verbatim piece, whose
+bytes are somebody else's."""
+untabbed(x::Row) = occursin('\t', x.string) ? Row(replace(x.string, '\t' => ' '), annots(x)) : x
 
 """
     input_waiting(io) -> Bool

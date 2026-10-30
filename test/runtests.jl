@@ -43,10 +43,11 @@ ansi(r::AbstractString) = sprint(print, r; context = :color => true)
 screen(rows::AbstractVector) = join(ansi.(rows), "\n")
 const REV = Face(inverse = true)
 # What a string of escapes says on the screen, as against how it looks; and the
-# columns it takes there.
+# columns it takes there - none to compare, for a tab, which is wherever the
+# terminal's next stop is from where the row happened to start.
 const SGR_OSC = r"\e\[[0-9;:]*[A-Za-z]|\e\][^\e]*\e[\\]"
 unescaped(s::AbstractString) = replace(String(s), SGR_OSC => "")
-cols(s::AbstractString) = textwidth(unescaped(s))
+cols(s::AbstractString) = (u = unescaped(s); occursin('\t', u) ? -1 : textwidth(u))
 # What is on the screen under the terminal's cursor, where `caret` puts it: the
 # character that starts at its column, or `nothing` - in the middle of a wide
 # one, or off the end.
@@ -162,6 +163,13 @@ end
     word = rowcat("a ", faced("b", bg(:red)))
     @test out(faced(word, bg(:blue))) == out(rowcat(faced("a ", bg(:blue)), faced("b", bg(:red))))
     @test out(TermInput.overlaid(word, 1:3, bg(:blue))) == out(faced("a b", bg(:blue)))
+    # A tab is one column and a space a line may break at, as a text area
+    # draws one. Measured as nothing and drawn to the terminal's next stop, a
+    # row with one in it fitted its box and pushed the edge out.
+    @test rowwidth("a\tb") == 3 && rowwidth(faced("a\tb", b)) == 3
+    @test rowwidth(rowcat("\t", v)) == 4
+    @test String(rowpad("a\tb", 5)) == "a\tb  " && String(rowfit("a\tbcd", 4)) == "a\tb…"
+    @test String.(rowwrap("ab\tcd", 3)) == ["ab", "cd"]
 end
 
 @testset "a key code is the bytes that arrived, and nothing is thrown away" begin
@@ -1714,6 +1722,14 @@ end
         @test all(r -> cols(ansi(r.text)) == 2, rs)
         # A word wider than the row is split by columns.
         @test texts(drawn("x" ^ 25, 10)) == ["x"^10, "x"^10, "x"^5]
+        # A tab outside a code block is whitespace, as GitHub draws it: one
+        # space, and a place to break - and the source keeps it, so columns
+        # pasted in as tab-separated text copy back out as they were.
+        rs = drawn("sin\t-300.0\t1.0\t0.9995")
+        @test texts(rs) == ["sin -300.0 1.0 0.9995"]
+        @test rs[1].src == "sin\t-300.0\t1.0\t0.9995"
+        @test texts(drawn("aaaa\tbbbb", 6)) == ["aaaa", "bbbb"]
+        @test texts(drawn("`a\tb` and > q\tr")) == ["`a b` and > q r"]
         # Too narrow for a marker or a box is cut to the width, never wider.
         for w in 1:6
             drawn("- a\n\n> b\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```\ncode\n```", w)
@@ -1829,6 +1845,14 @@ end
     TermInput.writerow(IOContext(io, :color => true),
                        rowcat("ab", verbatim("\e[31mXY", 2), faced("c", Face(weight = :bold))))
     @test String(take!(io)) == "ab\e[31mXY\e[0m\e[5G\e[1mc\e[22m"
+    # A tab is written as the space it was measured as, under its faces, and
+    # a verbatim piece's bytes as they came.
+    TermInput.writerow(IOContext(io, :color => true),
+                       rowcat(faced("a\tb", Face(weight = :bold)), verbatim("\t", 8), "\tc"))
+    @test String(take!(io)) == "\e[1ma b\e[22m\t\e[0m\e[12G c"
+    TermInput.writerow(io, "a\tb")
+    @test String(take!(io)) == "a b"
+    @test !(UInt8('\t') in frame_bytes([rowpad("x\ty", 10)]))
 end
 
 @testset "a widget at its own height" begin
