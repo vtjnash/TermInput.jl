@@ -83,11 +83,13 @@ import Markdown
 # specific enough that it is unlikely to have them already.
 export rowwidth, rowfit, rowpad, rowmid, rowwrap, rowcat, faced
 export TextBuffer
-export suspend, compose_external, mouse_reporting, bracketed_paste
+export suspend, compose_external, mouse_reporting, bracketed_paste,
+       focus_reporting
 export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer,
        listwindow, listmove, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
 export markdown_rows
-export KeyEvent, PasteEvent, MouseEvent, SchemeEvent, readevent, scheme_reports
+export KeyEvent, PasteEvent, MouseEvent, SchemeEvent, FocusEvent, LegacyMouseEvent,
+       readevent, scheme_reports
 export enter_terminal, leave_terminal, InputReader, arm!, EndEvent, frame_bytes,
        input_waiting
 # The key vocabulary is `readevent`'s or a host's to produce and every widget's
@@ -115,7 +117,7 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
         DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, codemime,
         highlighted_lines,
-        BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal,
+        BG_QUERY, SCHEME_REPORT, BG_REPORT, FOCUS_REPORT, HeldTerminal,
         Row, row, rowhead, rowtail, rowlines, rowwraplines, rowrstrip, rowvpad, overlaid,
         linked, verbatim, wrapspans, tablerows"""))
 end

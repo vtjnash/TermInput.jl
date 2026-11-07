@@ -16,7 +16,7 @@ import TermInput: settext!, curline, move!, newline!, insertblock!, paste!,
     backspace!, deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
     kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
-    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT, HeldTerminal
+    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT, FOCUS_REPORT, HeldTerminal
 import TermInput: Row, verbatim, linked, overlaid, rowhead, rowtail, rowlines, rowwraplines
 import InteractiveUtils
 import StyledStrings: Face, SimpleColor
@@ -307,6 +307,34 @@ end
     @test ev("\e[1;2A") == KeyEvent(K_SUP)
     @test ev("\e[1;2B") == KeyEvent(K_SDOWN)
     @test ev("\e[1;5A") == KeyEvent(K_UP)
+
+    # An X10 report is read whole, its three bytes with it - they are any byte
+    # at all, a high one among them - and the key after it is a key again. It
+    # is not decoded: it says the encoding asked for was lost.
+    io = IOBuffer(UInt8[0x1b, UInt8('['), UInt8('M'), 0x20, 0x92, UInt8('G'), UInt8('q')])
+    @test readevent(io) isa LegacyMouseEvent
+    @test readevent(io) == KeyEvent(Int('q'))
+    # A release spells `#`, and a column can spell a bound key: none of it is keys.
+    io = IOBuffer("\e[M#mG\e[M@mHj")
+    @test readevent(io) isa LegacyMouseEvent && readevent(io) isa LegacyMouseEvent
+    @test readevent(io) == KeyEvent(Int('j'))
+    # A report short of its bytes takes nothing of the sequence after it.
+    io = IOBuffer("\e[M G\e[Zq")
+    @test readevent(io) isa LegacyMouseEvent
+    @test readevent(io) == KeyEvent(K_STAB) && readevent(io) == KeyEvent(Int('q'))
+    # The keypad's Enter is `ESC O M` and has no bytes behind it.
+    io = IOBuffer("\eOMq")
+    @test readevent(io) == KeyEvent(K_NONE) && readevent(io) == KeyEvent(Int('q'))
+
+    # The focus, gained and lost; the keypad's Tab, `ESC O I`, is not it.
+    f = ev("\e[I")
+    @test f isa FocusEvent && f.focused && isempty(f.rest)
+    f = ev("\e[O")
+    @test f isa FocusEvent && !f.focused
+    @test ev("\eOI") == KeyEvent(K_NONE)
+    @test focus_reporting(true) == "\e[?1004h" && focus_reporting(false) == "\e[?1004l"
+    m = match(FOCUS_REPORT, "ab\e[Ocd")
+    @test m !== nothing && m[1] == "O"
 
     # A bracketed paste is one event and text, whatever keys it spells; the
     # key after it is a key again.
@@ -1210,6 +1238,17 @@ end
     s = String(take!(out))
     @test findfirst("\e[?1049l", s) < findfirst("\e[?1049h", s)
     @test endswith(s, mouse_reporting(true))          # put back, thrown or not
+
+    # Focus reports, on last and off first, and across a `suspend` like the
+    # rest: a child that never asked for them would read them as keys.
+    t = enter_terminal(IOBuffer(), out; mouse = true, focus = true)
+    @test t.focus && endswith(String(take!(out)), string(mouse_reporting(true), focus_reporting(true)))
+    suspend(() -> nothing, t)
+    s = String(take!(out))
+    @test startswith(s, focus_reporting(false)) && endswith(s, focus_reporting(true))
+    leave_terminal(t)
+    @test startswith(String(take!(out)), string(focus_reporting(false), mouse_reporting(false)))
+    @test !HeldTerminal(IOBuffer(), out).focus
 end
 
 @testset "the reader reads one event when it is armed, and none between" begin

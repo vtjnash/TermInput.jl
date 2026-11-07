@@ -90,6 +90,75 @@ end
 SchemeEvent(dark::Bool, rest::Vector{UInt8}) = SchemeEvent(dark, "", rest)
 
 """
+    FocusEvent(focused, rest)
+
+The terminal gained the focus (`CSI I`, `focused`) or lost it (`CSI O`). Sent
+once [`focus_reporting`](@ref) is on.
+
+Worth asking for less for the focus itself than for when it comes. xterm.js
+answers the mode being *set* with a report of the focus as it is, so a
+terminal that puts its modes back by replaying them says so through this - and
+that is the terminal whose other modes may not be what the host left them: VS
+Code, reattaching a saved session, sets the mouse tracking mode again and not
+the encoding (see [`LegacyMouseEvent`](@ref)). A host holding a mode it cannot
+afford to lose writes it again on either report; the bytes are few, and a
+terminal in good order is only told what it was already doing.
+
+`rest` is as [`SchemeEvent`](@ref)'s: always empty from [`readevent`](@ref),
+and for a host that takes a report out of a raw read with
+[`FOCUS_REPORT`](@ref), what the read held besides.
+"""
+struct FocusEvent
+    focused::Bool
+    rest::Vector{UInt8}
+end
+FocusEvent(focused::Bool) = FocusEvent(focused, UInt8[])
+
+"""
+    LegacyMouseEvent(rest)
+
+A mouse report in the X10 encoding - `CSI M` and three bytes, the button and
+the column and row each plus 32 - which nothing here asks for:
+[`mouse_reporting`](@ref) asks for SGR. One arriving means the encoding was put
+back to the default behind the host's back while reporting stayed on, and the
+answer is to write `mouse_reporting(true)` again. xterm.js restoring a saved
+terminal does exactly that: what it saves of the mouse is the tracking mode
+and not the encoding, so VS Code reattaching a session goes on reporting
+drags, in a form nobody asked for.
+
+Read whole and not decoded. It is the one report whose data follows its final
+byte, so a reader that stops at the final byte, as for any other sequence,
+leaves three bytes behind that are any byte at all - a space for every press,
+a `#` for every release, and whatever key the column happens to spell - and
+those arrive as keystrokes. The click itself is not worth placing: the report
+is the sign that the mode is wrong, and the next one, after the mode is put
+right, is in the encoding asked for.
+
+`rest` is as [`FocusEvent`](@ref)'s.
+"""
+struct LegacyMouseEvent
+    rest::Vector{UInt8}
+end
+LegacyMouseEvent() = LegacyMouseEvent(UInt8[])
+
+"""
+    focus_reporting(on) -> String
+
+The escape sequence that turns focus reports ([`FocusEvent`](@ref)) on or off:
+`CSI ? 1004 h` and `l`.
+"""
+focus_reporting(on::Bool) = on ? "\e[?1004h" : "\e[?1004l"
+
+"""
+    FOCUS_REPORT
+
+A focus report, `CSI I` or `CSI O`, as a `Regex` whose one capture is `I` for
+the focus gained and `O` for it lost. For a host taking one out of input it
+reads undecoded; [`readevent`](@ref) decodes it itself.
+"""
+const FOCUS_REPORT = r"\e\[([IO])"
+
+"""
     BG_QUERY
 
 Asks for the terminal's background colour: `OSC 11 ?`. The answer is a
@@ -128,7 +197,8 @@ buffer (tmux's is 128 bytes).
 const BG_REPORT = r"\e\]11;([\x21-\x7e]{1,100})(?:\a|\e\\)"
 
 """
-    readevent(io) -> KeyEvent | PasteEvent | MouseEvent | SchemeEvent
+    readevent(io) -> KeyEvent | PasteEvent | MouseEvent | SchemeEvent | FocusEvent |
+                     LegacyMouseEvent
 
 Read one input event from a terminal in raw mode. Blocks for the first byte,
 and - once `ESC [` or `ESC ]` has been seen and a sequence is therefore
@@ -148,8 +218,10 @@ What it reads is the dialect terminals speak by default, and xterm's:
     the word, and shift on a vertical one is [`K_SUP`](@ref)/[`K_SDOWN`](@ref)
   * the three spellings of Alt that are all in use - see below
   * SGR mouse reports ([`MouseEvent`](@ref)), bracketed pastes
-    ([`PasteEvent`](@ref)), and the scheme and background reports
-    ([`SchemeEvent`](@ref))
+    ([`PasteEvent`](@ref)), the scheme and background reports
+    ([`SchemeEvent`](@ref)) and the focus reports ([`FocusEvent`](@ref))
+  * an X10 mouse report, read whole so its three bytes are not keys, as the
+    sign that the encoding asked for was lost ([`LegacyMouseEvent`](@ref))
 
 A bare Escape is told from the head of a sequence by whether anything is
 already waiting behind it: a terminal writes a sequence in one write, and a
@@ -214,14 +286,14 @@ function readevent(io::IO)
             # it is the head of a CSI and not a byte to step over.
             c = read(io, UInt8)
             if c == UInt8('[') || c == UInt8('O')
-                ev = read_csi(io)
+                ev = read_csi(io, c == UInt8('['))
                 ev isa KeyEvent && ev.code == K_LEFT && return KeyEvent(K_WORD_LEFT)
                 ev isa KeyEvent && ev.code == K_RIGHT && return KeyEvent(K_WORD_RIGHT)
             end
         end
         return KeyEvent(K_NONE)
     end
-    read_csi(io)
+    read_csi(io, a == UInt8('['))
 end
 
 # The body of an OSC, with its `ESC ]` already read, to `BEL` or `ST`: the
@@ -243,8 +315,11 @@ function read_osc(io::IO)
     m === nothing || m.offset != 1 ? KeyEvent(K_NONE) : SchemeEvent(nothing, String(something(m[1])), UInt8[])
 end
 
-# The body of a CSI sequence, with its `ESC [` already read.
-function read_csi(io::IO)
+# The body of a CSI sequence, with its `ESC [` already read - or of an SS3 one,
+# `ESC O`, when `csi` is false, which reads the same way to its final byte but
+# is the keypad's: `ESC O M` is its Enter and not a mouse report, and `ESC O I`
+# its Tab and not the focus.
+function read_csi(io::IO, csi::Bool = true)
     params, fin = UInt8[], 0x00
     while true
         c = read(io, UInt8)
@@ -261,7 +336,25 @@ function read_csi(io::IO)
         length(params) > 32 && return KeyEvent(K_NONE)    # not a sequence a terminal sends
     end
     fin == UInt8('~') && params == b"200" && return read_paste(io)
+    if csi && isempty(params)
+        fin == UInt8('M') && return read_x10(io)
+        fin == UInt8('I') && return FocusEvent(true)
+        fin == UInt8('O') && return FocusEvent(false)
+    end
     decode_csi(String(params), Char(fin))
+end
+
+# The three bytes after an X10 report's `CSI M`, read and thrown away. Each is
+# a value plus 32, so never below a space: an `ESC` among them is the head of
+# whatever came next, and a report short of its bytes ends there rather than
+# taking that sequence's first byte with it.
+function read_x10(io::IO)
+    for _ in 1:3
+        eof(io) && break
+        peek(io, UInt8) == 0x1b && break
+        read(io, UInt8)
+    end
+    LegacyMouseEvent()
 end
 
 # The rest of a bracketed paste, its start marker already read: everything up

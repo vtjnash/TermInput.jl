@@ -79,7 +79,7 @@ and a host that already reads keys - a multiplexer that has put every
 terminal's keys into one form, a GUI, a protocol of its own - produces the codes
 itself and takes none of what follows. A host that has nothing composes these.
 
-* **`enter_terminal(in, out; altscreen, title, mouse, paste)`** puts the
+* **`enter_terminal(in, out; altscreen, title, mouse, paste, focus)`** puts the
   terminal in raw mode with the cursor hidden, and each of the keywords on
   where it is asked for - the alternate screen and a saved title are for a
   host that has the whole screen, and an inline one leaves them off. It
@@ -94,16 +94,23 @@ itself and takes none of what follows. A host that has nothing composes these.
 * **`readevent(io)`** reads one event from a terminal in raw mode: a
   `KeyEvent` whose `code` is what `handle!` takes, a `PasteEvent` whose `text`
   is what `paste!` takes, a `MouseEvent` whose `kind`, `x` and `y` are what
-  `click!` takes, or a `SchemeEvent`. It reads the dialect terminals speak by
-  default: the xterm keys and their modifiers, the three spellings of Alt,
-  SGR mouse reports and bracketed paste. A sequence it cannot place is
+  `click!` takes, a `SchemeEvent` or a `FocusEvent`. It reads the dialect
+  terminals speak by default: the xterm keys and their modifiers, the three
+  spellings of Alt, SGR mouse reports, bracketed paste and the focus. A
+  sequence it cannot place is
   consumed whole and comes back as `K_NONE`, which nothing binds -
   `REPL.TerminalMenus.readkey` returns Escape and leaves the tail to arrive
   as keys, which is Shift-Tab reading as Escape-then-`Z`. It never decides
   by the clock: a bare Escape is one with nothing already waiting behind it.
   It reads no kitty keyboard protocol and no mouse encoding but SGR; a host
   that wants one writes its own reader and keeps everything else, which is
-  why nothing here owns the loop.
+  why nothing here owns the loop. An X10 report, `CSI M` and three bytes, is
+  read whole and comes back as a `LegacyMouseEvent`, undecoded: it is the one
+  report whose data follows its final byte, so stopping there would leave
+  three bytes to arrive as keys, and one arriving means the terminal has lost
+  the SGR encoding behind the host's back - xterm.js restoring a saved
+  session puts the tracking mode back and not the encoding - so the host's
+  answer is `mouse_reporting(true)` again.
 * **`InputReader(t, events)`** is a task that reads one event each time it is
   armed - `arm!(r)` - and puts it on `events`, a `Channel` the host owns, so that whatever else wakes the
   loop goes on the same channel and the loop waits in one place. Between an
@@ -143,6 +150,11 @@ itself and takes none of what follows. A host that has nothing composes these.
   `readevent` reads the answers as `SchemeEvent`s. What dark or light means to
   the host is the host's; the reports have to be parsed here only so that
   they do not arrive as keys.
+* **`focus_reporting(on)`** asks for the focus gained and lost, as
+  `FocusEvent`s - `enter_terminal`'s `focus` holds it for the run. xterm.js
+  also reports the focus as it is whenever the mode is set, which is how a
+  terminal replaying its saved modes says so: a host that cannot afford to
+  lose the mouse writes `mouse_reporting(true)` again on either report.
 
 ### A whole program
 
@@ -428,7 +440,7 @@ Exported is what a host driving a widget writes on every call, under names
 specific enough that it is unlikely to have them already: the four widgets and
 their hints, `submission`, `isblank`, `picked`, `answer`, `listwindow`, `listmove`,
 `TextBuffer`, `suspend` and `compose_external`, the escape sequences for the
-mouse and bracketed paste, rows of faces and their measuring (`rowwidth`,
+mouse, bracketed paste and the focus, rows of faces and their measuring (`rowwidth`,
 `rowfit`, `rowpad`, `rowmid`, `rowwrap`, `rowcat`, `faced`), `markdown_rows`, the key vocabulary, and what reads it from a
 terminal: the events, `readevent`, `scheme_reports`, `enter_terminal`,
 `leave_terminal`, `InputReader`, `arm!`, `frame_bytes` and `input_waiting`. A host that has a
@@ -456,9 +468,9 @@ is likely to have already or one it uses once, where it sets a widget up:
 * `ACTIONS`, which is what `handle!` answers
 * `HeldTerminal`, what `enter_terminal` returns, whose `mouse` a host that
   toggles the mouse sets
-* `BG_QUERY`, `SCHEME_REPORT` and `BG_REPORT`: the background question on its
-  own, and the two reports as patterns, for a host that reads some of its input
-  undecoded and takes a report out of it
+* `BG_QUERY`, `SCHEME_REPORT`, `BG_REPORT` and `FOCUS_REPORT`: the background
+  question on its own, and the three reports as patterns, for a host that reads
+  some of its input undecoded and takes a report out of it
 
 ```julia
 import TermInput: render, handle!, text

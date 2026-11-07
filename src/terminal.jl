@@ -37,12 +37,13 @@ mutable struct HeldTerminal
     title::Bool
     mouse::Bool
     paste::Bool
+    focus::Bool
 end
-HeldTerminal(in::IO, out::IO) = HeldTerminal(in, out, nothing, false, false, false, false)
+HeldTerminal(in::IO, out::IO) = HeldTerminal(in, out, nothing, false, false, false, false, false)
 
 """
     enter_terminal(in = stdin, out = stdout; altscreen = false, title = false,
-                   mouse = false, paste = false) -> HeldTerminal
+                   mouse = false, paste = false, focus = false) -> HeldTerminal
 
 Put the terminal into the modes a loop driving a widget needs, in one write,
 and say what was done. Leave with [`leave_terminal`](@ref), in a `finally`.
@@ -62,18 +63,24 @@ its own and a frame shows the terminal's where it is wanted.
                 drags as `MouseEvent`s
   * `paste`     [`bracketed_paste`](@ref), which makes a paste one `PasteEvent`
                 rather than keys - a `q` in it is not quitting
+  * `focus`     [`focus_reporting`](@ref), which reports the focus gained and
+                lost as `FocusEvent`s - and, from xterm.js, the focus as it is
+                whenever a terminal puts its modes back, which is when the
+                mouse needs asking for again
 
 Anything but a tty is taken as it is and nothing is asked of it, so an
 `IOBuffer` at either end is a terminal a test can read the sequences out of.
 """
 function enter_terminal(in::IO = stdin, out::IO = stdout; altscreen::Bool = false,
-                        title::Bool = false, mouse::Bool = false, paste::Bool = false)
+                        title::Bool = false, mouse::Bool = false, paste::Bool = false,
+                        focus::Bool = false)
     tty = in isa Base.TTY ?
         REPL.Terminals.TTYTerminal(get(ENV, "TERM", "xterm"), in, out, stderr) : nothing
-    t = HeldTerminal(in, out, tty, altscreen, title, mouse, paste)
+    t = HeldTerminal(in, out, tty, altscreen, title, mouse, paste, focus)
     write(out, string(altscreen ? "\e[?1049h" : "", "\e[?25l", title ? "\e[22;2t" : ""))
     tty === nothing || REPL.Terminals.raw!(tty, true)
-    write(out, string(mouse ? mouse_reporting(true) : "", paste ? bracketed_paste(true) : ""))
+    write(out, string(mouse ? mouse_reporting(true) : "", paste ? bracketed_paste(true) : "",
+                      focus ? focus_reporting(true) : ""))
     t
 end
 
@@ -88,8 +95,8 @@ end
 """
     leave_terminal(t::HeldTerminal)
 
-Undo what [`enter_terminal`](@ref) did, in the reverse order: the mouse and
-the paste brackets off, raw mode off, the cursor shown, the alternate screen
+Undo what [`enter_terminal`](@ref) did, in the reverse order: focus reports,
+the mouse and the paste brackets off, raw mode off, the cursor shown, the alternate screen
 left and the title put back.
 
 It never throws. The commonest way to get here is the terminal having gone
@@ -101,7 +108,8 @@ does not stop the other.
 """
 function leave_terminal(t::HeldTerminal)
     try
-        t.mouse && write(t.out, mouse_reporting(false))
+        write(t.out, string(t.focus ? focus_reporting(false) : "",
+                            t.mouse ? mouse_reporting(false) : ""))
     catch
     end
     try
@@ -125,7 +133,8 @@ now, the mouse included. The rest is [`suspend(f, term)`](@ref suspend), and so
 is the rule about where it may be called from.
 """
 function suspend(f, t::HeldTerminal)
-    write(t.out, string(t.mouse ? mouse_reporting(false) : "",
+    write(t.out, string(t.focus ? focus_reporting(false) : "",
+                        t.mouse ? mouse_reporting(false) : "",
                         t.paste ? bracketed_paste(false) : ""))
     tty_raw!(t, false)
     write(t.out, string("\e[?25h", t.altscreen ? "\e[?1049l" : ""))
@@ -135,7 +144,8 @@ function suspend(f, t::HeldTerminal)
         write(t.out, string(t.altscreen ? "\e[?1049h" : "", "\e[?25l"))
         tty_raw!(t, true)
         write(t.out, string(t.mouse ? mouse_reporting(true) : "",
-                            t.paste ? bracketed_paste(true) : ""))
+                            t.paste ? bracketed_paste(true) : "",
+                            t.focus ? focus_reporting(true) : ""))
     end
 end
 
