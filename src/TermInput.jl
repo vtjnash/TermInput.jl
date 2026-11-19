@@ -92,7 +92,7 @@ export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer
 export markdown_rows
 export KeyEvent, PasteEvent, MouseEvent, SchemeEvent, FocusEvent, LegacyMouseEvent,
        FenceEvent, readevent, scheme_reports
-export enter_terminal, leave_terminal, InputReader, arm!, EndEvent, frame_bytes,
+export enter_terminal, leave_terminal, InputReader, arm!, suspend!, resume!, EndEvent, frame_bytes,
        input_waiting
 # The key vocabulary is `readevent`'s or a host's to produce and every widget's
 # to bind, so it is re-exported rather than left behind the submodule: a program

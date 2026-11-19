@@ -71,7 +71,8 @@ tty.
 `read(stdin)` will race the child for every keystroke the user types into it,
 and the keystrokes it wins are gone. The rule for a host with a reader task is
 that it must be parked between events rather than sitting in `read`, and that
-this runs while it is parked.
+this runs while it is parked - or inside [`suspend!`](@ref), which stops an
+[`InputReader`](@ref) wherever it is, in its read too, from any task.
 """
 function suspend(f, term; mouse::Bool = false, motion::Bool = false, paste::Bool = false)
     out = term === nothing ? stdout : term.out_stream

@@ -69,27 +69,36 @@ the event it was armed for - so the host never sees one. A read of the host's
 own that is undecoded finds the answer with [`fence_in`](@ref) and returns that;
 the reader notes it, and hands the event on only for its `rest`.
 
-`close(r)` lets it go: a reader that is parked ends there, and puts nothing
-more on `events`. One that is reading cannot be stopped in its read, and would
-otherwise take whatever is typed next - at the prompt the program returns to.
-Made from a `HeldTerminal` entered with `fence`, `close` asks the terminal for
-a cut, and the reader reads up to it, dropping what came before, and ends
-there; `close` waits for that, as [`leave_terminal`](@ref) does, so that when it
-returns nothing is reading. Otherwise, or if the answer does not come in
-[`FENCE_PATIENCE`](@ref), the reader ends when its read does. Either way it
-puts nothing more on `events`.
+[`suspend!`](@ref) stops it reading, from any task, so that something else can
+read the terminal for a while; `resume!` lets it go on. `close(r)` lets it go
+for good: it puts nothing more on `events`, and ends. A reader that is parked
+stops where it is. One that is in its read cannot be stopped there, and would
+otherwise take whatever is typed next - at the prompt the program returns to,
+or in the reader the terminal is handed to. Made from a `HeldTerminal` entered
+with `fence`, both ask the terminal for a cut, and the reader reads up to it,
+dropping everything it reads before - stale by the time anybody could act on
+it - and stops there; both wait for that, so that when they return nothing is
+reading. Otherwise, or if the answer does not come in
+[`FENCE_PATIENCE`](@ref), the reader stops when its read does, and drops what
+it read.
 """
 mutable struct InputReader{T}
     ready::Channel{T}            # host -> reader: read one event, with this
     task::Union{Nothing,Task}
-    closed::Bool
-    reading::Bool                # in its read, and not to be stopped there
     term::Union{Nothing,HeldTerminal}
+    # The rest is the reader's state, and every field of it - and the
+    # terminal's fence count - is read and written under `cond`'s lock, since
+    # `suspend!` may come from any thread.
+    cond::Threads.Condition
+    closed::Bool
+    held::Int                    # `suspend!`s not yet `resume!`d
+    reading::Bool                # in its read, and not to be stopped there
+    cutting::Bool                # reading on to a fence's answer, dropping all
 end
 
 function InputReader(read, in::IO, events::Channel, ::Type{T},
                      term::Union{Nothing,HeldTerminal} = nothing) where {T}
-    r = InputReader{T}(Channel{T}(1), nothing, false, false, term)
+    r = InputReader{T}(Channel{T}(1), nothing, term, Threads.Condition(), false, 0, false, false)
     r.task = @async readloop(r, read, in, events)
     r
 end
@@ -102,55 +111,46 @@ readkeys(io::IO, ::Nothing) = readevent(io)
 # The task's body, and a function so that it is compiled for the read, the
 # stream and the channel it was handed, which nothing outside it ever sees.
 function readloop(r::InputReader, read, in::IO, events::Channel)
-    t = r.term
     while true
         arg = try
             take!(r.ready)
         catch
-            break                           # closed: nobody wants more
+            return                          # closed: nobody wants more
         end
-        # Closed while the arming sat in the channel: nothing has been read.
-        r.closed && break
-        # Until an event for the host, or the cut after a close. Nothing yields
-        # between the test of `closed` and the read, so a `close` on this
-        # thread sees `reading` as it is.
+        # Until an event for the host: an arming lasts through a `suspend!`,
+        # and what is read before its cut is nobody's.
         while true
-            r.reading = true
+            lock(r.cond)
+            try
+                # Held, and not reading on to a cut: nothing reads.
+                while r.held > 0 && !r.cutting && !r.closed
+                    wait(r.cond)
+                end
+                # Closed before the read, or at its cut: nothing more is ours.
+                r.closed && !r.cutting && return
+                r.reading = true
+            finally
+                unlock(r.cond)
+            end
             ev = try
                 read(in, arg)
             catch e
                 # EOF because the terminal closed, EIO because the pty is gone.
                 # The loop is waiting on its channel and nothing else is coming,
                 # so it is told - unless it has already let go.
-                r.reading = false
-                r.closed || try
+                closed = @lock r.cond begin
+                    r.reading = r.cutting = false
+                    notify(r.cond)
+                    r.closed
+                end
+                closed || try
                     put!(events, EndEvent(e))
                 catch
                 end
                 return
             end
-            r.reading = false
-            if ev isa FenceEvent && t !== nothing
-                answered!(t)
-                # A raw read can hold the answers to two questions at once:
-                # the one asked on the way in, and a close's.
-                rest = ev.rest
-                while !isempty(rest)
-                    f = fence_in(t, rest)
-                    f === nothing && break
-                    answered!(t)
-                    rest = f.rest
-                end
-                r.closed && t.fences == 0 && return     # the cut: the rest is not ours
-                (r.closed || isempty(rest)) && continue # not the host's: read on
-                ev = FenceEvent(ev.attrs, rest)         # what else the read held is
-            end
-            if r.closed
-                # Read past a close: what comes before the cut is dropped, and
-                # the reading goes on to it while there is one to come.
-                t !== nothing && t.fences > 0 && continue
-                return
-            end
+            ev = @lock r.cond read_done!(r, ev)
+            ev === nothing && continue
             try
                 put!(events, ev)
             catch
@@ -159,6 +159,33 @@ function readloop(r::InputReader, read, in::IO, events::Channel)
             break
         end
     end
+end
+
+# The event just read, as the host is to have it, or `nothing` for none: an
+# answer to the fence noted, and anything read while held or closed dropped.
+# Under the lock.
+function read_done!(r::InputReader, ev)
+    r.reading = false
+    t = r.term
+    if ev isa FenceEvent && t !== nothing
+        answered!(t)
+        # A raw read can hold the answers to two questions at once: the one
+        # asked on the way in, and a cut's.
+        rest = ev.rest
+        while !isempty(rest)
+            f = fence_in(t, rest)
+            f === nothing && break
+            answered!(t)
+            rest = f.rest
+        end
+        if t.fences == 0 && r.cutting
+            r.cutting = false               # the cut: whoever waits for it
+            notify(r.cond)
+        end
+        (r.held > 0 || r.closed || isempty(rest)) && return nothing
+        return FenceEvent(ev.attrs, rest)
+    end
+    r.held > 0 || r.closed ? nothing : ev
 end
 
 """
@@ -172,23 +199,104 @@ read it.
 arm!(r::InputReader{Nothing}) = arm!(r, nothing)
 arm!(r::InputReader{T}, arg::T) where {T} = (put!(r.ready, arg); r)
 
-function Base.close(r::InputReader)
-    r.closed = true
-    isopen(r.ready) && close(r.ready)
+# Stop `r` reading, under its lock: a reader in its read is given a cut to
+# read to, where the terminal answers, and waited for until it is there.
+function cut!(r::InputReader)
+    r.reading || return
     t = r.term
-    if r.reading && t !== nothing && t.fence
-        # In its read: give it a cut to stop at. The question asked on the way
-        # in, while it is unanswered, is one already.
-        t.answered && try
-            ask!(t)
-        catch
+    (t === nothing || !t.fence) && return       # no stopping it: it drops what it reads
+    # The question asked on the way in, while it is unanswered, is one already.
+    t.answered && try
+        ask!(t)
+    catch
+    end
+    t.fences > 0 || return
+    r.cutting = true
+    deadline = fence_deadline(t, time())
+    # A condition has no timeout, so a timer wakes the wait at the deadline.
+    timer = Timer(max(deadline - time(), 0.0)) do _
+        @lock r.cond notify(r.cond)
+    end
+    try
+        while r.cutting && time() < deadline
+            wait(r.cond)
         end
-        task = r.task::Task
-        if t.fences > 0
-            timedwait(() -> istaskdone(task), max(fence_deadline(t, time()) - time(), 0.0);
-                      pollint = 0.005)
-            istaskdone(task) || gave_up!(t)
+    finally
+        close(timer)
+    end
+    if r.cutting                                # not answered in time
+        r.cutting = false
+        gave_up!(t)
+        notify(r.cond)
+    end
+    nothing
+end
+
+"""
+    suspend!(r::InputReader)
+    suspend!(f, r::InputReader)
+
+Stop `r` reading, so that something else can read the terminal - a child it is
+handed to, a prompt, a reader of the host's own - until [`resume!`](@ref), or
+for the duration of `f`. Callable from any task: it returns once nothing is
+reading. A reader that is parked, or armed and not yet reading, does not read
+until it is resumed. One that is in its read is given a cut to read to, on a
+terminal entered with `fence`, and everything it reads up to it is dropped -
+input meant for a screen that will have changed by the time anybody could act
+on it. Without a fence, or with no answer in [`FENCE_PATIENCE`](@ref), there is
+no stopping a read, and the next event the terminal sends is read and dropped.
+
+An arming lasts through it: a reader armed when it is suspended reads the event
+it was armed for once resumed, and `arm!` while it is suspended is kept for
+then. Suspends nest, and the reader reads again once each has been resumed.
+
+Only the reading is stopped. Whatever the host writes - its frames, and the
+modes that [`suspend`](@ref) turns off and on - is the host's to keep from
+landing in the middle of each other: `suspend!` on the task that draws, or
+under the lock its drawing takes. Handing the terminal to a child is both:
+
+    suspend!(reader) do
+        suspend(term) do
+            run(`vim \$path`)
         end
     end
+"""
+function suspend!(r::InputReader)
+    @lock r.cond begin
+        r.held += 1
+        r.held == 1 && cut!(r)
+    end
+    nothing
+end
+function suspend!(f, r::InputReader)
+    suspend!(r)
+    try
+        f()
+    finally
+        resume!(r)
+    end
+end
+
+"""
+    resume!(r::InputReader)
+
+Undo one [`suspend!`](@ref): once each has been, `r` reads again - the event it
+was armed for, if it was.
+"""
+function resume!(r::InputReader)
+    @lock r.cond begin
+        r.held = max(r.held - 1, 0)
+        r.held == 0 && notify(r.cond)
+    end
+    nothing
+end
+
+function Base.close(r::InputReader)
+    @lock r.cond begin
+        r.closed = true
+        cut!(r)
+        notify(r.cond)
+    end
+    isopen(r.ready) && close(r.ready)
     nothing
 end

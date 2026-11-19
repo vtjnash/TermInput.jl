@@ -1478,13 +1478,13 @@ end
     sleep(0.05)
     write(p.in, "j")
     @test take!(events) == KeyEvent(Int('j')) && t.answered && t.fences == 0
-    # Closed in its read, it is given a cut and reads to it: the report before
-    # is dropped, the key after is for whoever reads next, and when `close`
-    # returns nothing is reading.
+    # Closed in its read, it is given a cut and reads to it: the key and the
+    # report before are dropped, the key after is for whoever reads next, and
+    # when `close` returns nothing is reading.
     arm!(r)
     sleep(0.05)
     @test r.reading
-    @async (sleep(0.1); write(p.in, "\e[<35;3;3M\e[?62cz"))
+    @async (sleep(0.1); write(p.in, "k\e[<35;3;3M\e[?62cz"))
     close(r)
     @test istaskdone(r.task) && !isready(events)
     @test endswith(String(take!(out)), FENCE_QUERY)
@@ -1519,6 +1519,69 @@ end
     @test ev isa FenceEvent && ev.rest == Vector{UInt8}("xy") && t.fences == 0
     close(r)
     close(p.in)
+end
+
+@testset "a reader suspended reads nothing until it is resumed" begin
+    pipe() = (p = Pipe(); Base.link_pipe!(p; reader_supports_async = true, writer_supports_async = true); p)
+    fenced(in, out) = (t = HeldTerminal(in, out); t.fence = t.answered = true; t)
+    events = Channel{Any}(8)
+
+    # Parked, it stays parked: an arming while suspended is kept for after,
+    # and what arrives meanwhile is for whoever else reads.
+    p, out = pipe(), IOBuffer()
+    t = fenced(p.out, out)
+    r = InputReader(t, events)
+    suspend!(r)
+    @test isempty(take!(out))                   # nothing to cut: nothing asked
+    arm!(r)
+    write(p.in, "a")
+    sleep(0.1)
+    @test !isready(events) && read(p.out, UInt8) == UInt8('a')
+    resume!(r)
+    write(p.in, "b")
+    @test take!(events) == KeyEvent(Int('b'))
+
+    # In its read, from another task: it reads to the cut, dropping what came
+    # first, and is stopped there when `suspend!` returns. The next reader has
+    # the terminal, and the arming goes on once resumed.
+    arm!(r)
+    sleep(0.05)
+    @async (sleep(0.1); write(p.in, "k\e[<35;1;1M\e[?62c"))
+    fetch(Threads.@spawn suspend!(r))
+    @test !r.reading && !isready(events) && t.fences == 0
+    @test String(take!(out)) == FENCE_QUERY
+    write(p.in, "x")
+    @test read(p.out, UInt8) == UInt8('x')      # the other reader's
+    # Nested: read again only once each is resumed.
+    suspend!(r)
+    resume!(r)
+    write(p.in, "y")
+    sleep(0.1)
+    @test !isready(events)
+    resume!(r)
+    @test take!(events) == KeyEvent(Int('y'))
+
+    # The block form, and a read with no fence to stop it: the one event it
+    # reads is dropped, and the arming lasts.
+    q = pipe()
+    u = InputReader(q.out, events)
+    arm!(u)
+    sleep(0.05)
+    suspend!(u) do
+        write(q.in, "s")
+        sleep(0.1)
+        @test !isready(events)
+    end
+    write(q.in, "z")
+    @test take!(events) == KeyEvent(Int('z'))
+
+    # Closed while suspended, it ends.
+    suspend!(u)
+    close(u)
+    sleep(0.05)
+    @test istaskdone(u.task) && !isready(events)
+    close(r)
+    close(p.in); close(q.in)
 end
 
 @testset "a frame is one write, cursor hidden first and shown last" begin
