@@ -293,6 +293,12 @@ end
     @test m isa MouseEvent && m.kind === :press && m.x == 40 && m.y == 12
     @test ev("\e[<0;40;12m").kind === :release
     @test ev("\e[<32;40;12M").kind === :drag         # button 0 + motion
+    # The pointer moving with no button held, which only motion reporting sends.
+    @test ev("\e[<35;40;12M") == MouseEvent(:move, 3, 40, 12, 0)
+    # The back and forward buttons are their own, and not the left and middle ones.
+    @test ev("\e[<128;5;5M") == MouseEvent(:press, 128, 5, 5, 0)
+    @test ev("\e[<129;5;5m") == MouseEvent(:release, 129, 5, 5, 0)
+    @test ev("\e[<160;5;5M") == MouseEvent(:drag, 128, 5, 5, 0)
     @test ev("\e[<64;5;5M").kind === :wheelup
     @test ev("\e[<65;5;5M").kind === :wheeldown
     @test ev("\e[<16;5;5M").mods == 4                # ctrl-click
@@ -1191,6 +1197,18 @@ end
     @test String(take!(out)) == "\e[?25l"
     leave_terminal(t)
     @test String(take!(out)) == "\e[?25h"
+
+    # Motion reporting is asked for in place of drags, and put back after a
+    # suspend as it was asked for.
+    t = enter_terminal(IOBuffer(), out; mouse = true, motion = true)
+    @test t.motion && occursin("\e[?1006h\e[?1003h", String(take!(out)))
+    suspend(() -> nothing, t)
+    s = String(take!(out))
+    @test startswith(s, mouse_reporting(false)) && endswith(s, "\e[?1006h\e[?1003h")
+    leave_terminal(t)
+    @test startswith(String(take!(out)), mouse_reporting(false))
+    # Off takes off either, so a host need not remember which it asked for.
+    @test occursin("\e[?1003l", mouse_reporting(false)) && occursin("\e[?1002l", mouse_reporting(false))
 
     # A mouse turned off during the run is not turned off again on the way out.
     t = enter_terminal(IOBuffer(), out; mouse = true)

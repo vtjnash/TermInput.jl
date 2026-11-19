@@ -19,7 +19,9 @@ it reads from, what it writes to, and which modes it set, so that
 on and off during a run - owning the mouse costs the terminal's own selection,
 so it is worth a key - and a host that does writes [`mouse_reporting`](@ref)
 itself and sets `t.mouse` to match, so that `suspend` and `leave_terminal` put
-back what is on now.
+back what is on now. `t.motion` is whether that reporting includes the
+pointer's moves with no button held, and a host that turns the mouse back on
+asks for the same: `mouse_reporting(true; t.motion)`.
 
 `displaysize(t)` and `write(t, x)` are the output's, `readevent(t)` and
 `input_waiting(t)` the input's.
@@ -38,12 +40,13 @@ mutable struct HeldTerminal
     mouse::Bool
     paste::Bool
     focus::Bool
+    motion::Bool
 end
-HeldTerminal(in::IO, out::IO) = HeldTerminal(in, out, nothing, false, false, false, false, false)
+HeldTerminal(in::IO, out::IO) = HeldTerminal(in, out, nothing, false, false, false, false, false, false)
 
 """
     enter_terminal(in = stdin, out = stdout; altscreen = false, title = false,
-                   mouse = false, paste = false, focus = false) -> HeldTerminal
+                   mouse = false, motion = false, paste = false, focus = false) -> HeldTerminal
 
 Put the terminal into the modes a loop driving a widget needs, in one write,
 and say what was done. Leave with [`leave_terminal`](@ref), in a `finally`.
@@ -61,6 +64,8 @@ its own and a frame shows the terminal's where it is wanted.
                 shell's prompt sets the next
   * `mouse`     [`mouse_reporting`](@ref), which reports presses, releases and
                 drags as `MouseEvent`s
+  * `motion`    with `mouse`, the pointer's moves with no button held as well,
+                as `:move` events, for a host that shows what it rests on
   * `paste`     [`bracketed_paste`](@ref), which makes a paste one `PasteEvent`
                 rather than keys - a `q` in it is not quitting
   * `focus`     [`focus_reporting`](@ref), which reports the focus gained and
@@ -72,14 +77,14 @@ Anything but a tty is taken as it is and nothing is asked of it, so an
 `IOBuffer` at either end is a terminal a test can read the sequences out of.
 """
 function enter_terminal(in::IO = stdin, out::IO = stdout; altscreen::Bool = false,
-                        title::Bool = false, mouse::Bool = false, paste::Bool = false,
-                        focus::Bool = false)
+                        title::Bool = false, mouse::Bool = false, motion::Bool = false,
+                        paste::Bool = false, focus::Bool = false)
     tty = in isa Base.TTY ?
         REPL.Terminals.TTYTerminal(get(ENV, "TERM", "xterm"), in, out, stderr) : nothing
-    t = HeldTerminal(in, out, tty, altscreen, title, mouse, paste, focus)
+    t = HeldTerminal(in, out, tty, altscreen, title, mouse, paste, focus, motion)
     write(out, string(altscreen ? "\e[?1049h" : "", "\e[?25l", title ? "\e[22;2t" : ""))
     tty === nothing || REPL.Terminals.raw!(tty, true)
-    write(out, string(mouse ? mouse_reporting(true) : "", paste ? bracketed_paste(true) : "",
+    write(out, string(mouse ? mouse_reporting(true; motion) : "", paste ? bracketed_paste(true) : "",
                       focus ? focus_reporting(true) : ""))
     t
 end
@@ -143,7 +148,7 @@ function suspend(f, t::HeldTerminal)
     finally
         write(t.out, string(t.altscreen ? "\e[?1049h" : "", "\e[?25l"))
         tty_raw!(t, true)
-        write(t.out, string(t.mouse ? mouse_reporting(true) : "",
+        write(t.out, string(t.mouse ? mouse_reporting(true; t.motion) : "",
                             t.paste ? bracketed_paste(true) : "",
                             t.focus ? focus_reporting(true) : ""))
     end

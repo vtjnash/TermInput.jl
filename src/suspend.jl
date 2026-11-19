@@ -8,7 +8,7 @@
 # every TUI has and none of them has anywhere to put.
 
 """
-    mouse_reporting(on) -> String
+    mouse_reporting(on; motion = false) -> String
 
 The escape sequences that turn mouse reporting on and off.
 
@@ -17,11 +17,20 @@ unreportable; `1002` reports presses, releases and motion *while a button is
 held*, which is exactly a drag and nothing more - `1003` would deliver a report
 per cell of idle pointer movement.
 
+`motion = true` asks for that report anyway, `1003` in place of `1002`, for a
+host that shows something for what the pointer rests on: a link's target, a
+preview. Each comes back as a `:move` [`MouseEvent`](@ref), and a host that
+asks for them is one with something to do with every one. Off is the same
+either way, and takes off both: terminals differ on whether `1002`'s reset
+ends `1003`, and VTE's does not, so a host that turns the mouse off without
+saying which it asked for would otherwise leave every move still reporting.
+
 Here because [`suspend`](@ref) has to put it back the way it found it, and a
 host that owns the mouse should not have to keep a second copy of the two
 strings in step with this one.
 """
-mouse_reporting(on::Bool) = on ? "\e[?1006h\e[?1002h" : "\e[?1002l\e[?1006l"
+mouse_reporting(on::Bool; motion::Bool = false) =
+    on ? string("\e[?1006h", motion ? "\e[?1003h" : "\e[?1002h") : "\e[?1003l\e[?1002l\e[?1006l"
 
 """
     bracketed_paste(on) -> String
@@ -35,7 +44,7 @@ a keystroke like any other, and a pasted tab moves the focus.
 bracketed_paste(on::Bool) = on ? "\e[?2004h" : "\e[?2004l"
 
 """
-    suspend(f, term; mouse = false, paste = false)
+    suspend(f, term; mouse = false, motion = false, paste = false)
 
 Give the terminal back for the duration of `f`, then take it again.
 
@@ -43,8 +52,9 @@ For handing stdin to a child process - `\$EDITOR`, mainly. Everything a TUI does
 to the terminal is undone in order and redone after: mouse reporting off, raw
 mode off, the cursor shown, the alternate screen released, so the child gets a
 terminal that looks untouched and its own scrollback. `mouse` and `paste` say
-whether the host had mouse reporting and bracketed paste on, since only it
-knows - and a shell that never asked for the brackets would read them as keys.
+whether the host had mouse reporting and bracketed paste on, and `motion`
+whether the mouse's reports took in the pointer's moves, since only it knows -
+and a shell that never asked for the brackets would read them as keys.
 
 A host that entered with [`enter_terminal`](@ref) passes the `HeldTerminal` it
 returned instead, and what is undone and redone is what was done - see
@@ -63,7 +73,7 @@ and the keystrokes it wins are gone. The rule for a host with a reader task is
 that it must be parked between events rather than sitting in `read`, and that
 this runs while it is parked.
 """
-function suspend(f, term; mouse::Bool = false, paste::Bool = false)
+function suspend(f, term; mouse::Bool = false, motion::Bool = false, paste::Bool = false)
     out = term === nothing ? stdout : term.out_stream
     write(out, string(mouse ? mouse_reporting(false) : "", paste ? bracketed_paste(false) : ""))
     term === nothing || REPL.Terminals.raw!(term, false)
@@ -73,7 +83,7 @@ function suspend(f, term; mouse::Bool = false, paste::Bool = false)
     finally
         write(out, "\e[?1049h\e[?25l")
         term === nothing || REPL.Terminals.raw!(term, true)
-        write(out, string(mouse ? mouse_reporting(true) : "", paste ? bracketed_paste(true) : ""))
+        write(out, string(mouse ? mouse_reporting(true; motion) : "", paste ? bracketed_paste(true) : ""))
     end
 end
 
