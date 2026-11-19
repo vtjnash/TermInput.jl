@@ -79,12 +79,12 @@ and a host that already reads keys - a multiplexer that has put every
 terminal's keys into one form, a GUI, a protocol of its own - produces the codes
 itself and takes none of what follows. A host that has nothing composes these.
 
-* **`enter_terminal(in, out; altscreen, title, mouse, motion, paste, focus)`** puts the
-  terminal in raw mode with the cursor hidden, and each of the keywords on
-  where it is asked for - the alternate screen and a saved title are for a
-  host that has the whole screen, and an inline one leaves them off; `motion`
-  adds the pointer's moves with no button held to the mouse's reports, for a
-  host that shows what it rests on. It
+* **`enter_terminal(in, out; altscreen, title, mouse, motion, paste, focus)`**
+  puts the terminal in raw mode with the cursor hidden, and each of the
+  keywords on where it is asked for - the alternate screen and a saved title
+  are for a host that has the whole screen, and an inline one leaves them off;
+  `motion` adds the pointer's moves with no button held to the mouse's
+  reports, for a host that shows what it rests on. It
   returns a `HeldTerminal`, which says what was done: `leave_terminal(t)`, in
   the host's own `finally`, undoes exactly that and never throws, since the
   commonest way out of a loop is a terminal that has already gone away; and
@@ -112,7 +112,7 @@ itself and takes none of what follows. A host that has nothing composes these.
   three bytes to arrive as keys, and one arriving means the terminal has lost
   the SGR encoding behind the host's back - xterm.js restoring a saved
   session puts the tracking mode back and not the encoding - so the host's
-  answer is `mouse_reporting(true)` again.
+  answer is `mouse_reporting(true)` again - with `motion`, if it asked for that.
 * **`InputReader(t, events)`** is a task that reads one event each time it is
   armed - `arm!(r)` - and puts it on `events`, a `Channel` the host owns, so that whatever else wakes the
   loop goes on the same channel and the loop waits in one place. Between an

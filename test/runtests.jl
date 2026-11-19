@@ -1198,11 +1198,17 @@ end
     leave_terminal(t)
     @test String(take!(out)) == "\e[?25h"
 
-    # Motion reporting is asked for in place of drags, and taken off the same way.
+    # Motion reporting is asked for in place of drags, and put back after a
+    # suspend as it was asked for.
     t = enter_terminal(IOBuffer(), out; mouse = true, motion = true)
     @test t.motion && occursin("\e[?1006h\e[?1003h", String(take!(out)))
+    suspend(() -> nothing, t)
+    s = String(take!(out))
+    @test startswith(s, mouse_reporting(false)) && endswith(s, "\e[?1006h\e[?1003h")
     leave_terminal(t)
-    @test startswith(String(take!(out)), "\e[?1003l\e[?1006l")
+    @test startswith(String(take!(out)), mouse_reporting(false))
+    # Off takes off either, so a host need not remember which it asked for.
+    @test occursin("\e[?1003l", mouse_reporting(false)) && occursin("\e[?1002l", mouse_reporting(false))
 
     # A mouse turned off during the run is not turned off again on the way out.
     t = enter_terminal(IOBuffer(), out; mouse = true)

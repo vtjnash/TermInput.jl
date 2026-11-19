@@ -49,8 +49,9 @@ and are what `click!` takes. `mods` is a bit each: 1 shift, 2 alt, 4 ctrl.
 
 `button` is 0 for the left button, 1 the middle and 2 the right, and 128 and 129
 for the back and forward buttons many mice have beside them, numbered as the
-terminal reports them; 3 for a `:move` or a `:release` the terminal did not say
-the button of.
+terminal reports them; 3 for a `:move`, which has none. A widget's `click!`
+takes the `kind` alone, so a host that does not want the back button to click
+looks at `button` before it passes a press on.
 """
 struct MouseEvent
     kind::Symbol

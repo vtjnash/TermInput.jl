@@ -20,7 +20,8 @@ on and off during a run - owning the mouse costs the terminal's own selection,
 so it is worth a key - and a host that does writes [`mouse_reporting`](@ref)
 itself and sets `t.mouse` to match, so that `suspend` and `leave_terminal` put
 back what is on now. `t.motion` is whether that reporting includes the
-pointer's moves with no button held.
+pointer's moves with no button held, and a host that turns the mouse back on
+asks for the same: `mouse_reporting(true; t.motion)`.
 
 `displaysize(t)` and `write(t, x)` are the output's, `readevent(t)` and
 `input_waiting(t)` the input's.
@@ -113,7 +114,7 @@ does not stop the other.
 function leave_terminal(t::HeldTerminal)
     try
         write(t.out, string(t.focus ? focus_reporting(false) : "",
-                            t.mouse ? mouse_reporting(false; t.motion) : ""))
+                            t.mouse ? mouse_reporting(false) : ""))
     catch
     end
     try
@@ -138,7 +139,7 @@ is the rule about where it may be called from.
 """
 function suspend(f, t::HeldTerminal)
     write(t.out, string(t.focus ? focus_reporting(false) : "",
-                        t.mouse ? mouse_reporting(false; t.motion) : "",
+                        t.mouse ? mouse_reporting(false) : "",
                         t.paste ? bracketed_paste(false) : ""))
     tty_raw!(t, false)
     write(t.out, string("\e[?25h", t.altscreen ? "\e[?1049l" : ""))
