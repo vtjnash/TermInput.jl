@@ -8,7 +8,7 @@
 # every TUI has and none of them has anywhere to put.
 
 """
-    mouse_reporting(on) -> String
+    mouse_reporting(on; motion = false) -> String
 
 The escape sequences that turn mouse reporting on and off.
 
@@ -17,11 +17,18 @@ unreportable; `1002` reports presses, releases and motion *while a button is
 held*, which is exactly a drag and nothing more - `1003` would deliver a report
 per cell of idle pointer movement.
 
+`motion = true` asks for that report anyway, `1003` in place of `1002`, for a
+host that shows something for what the pointer rests on: a link's target, a
+preview. Each comes back as a `:move` [`MouseEvent`](@ref), and a host that
+asks for them is one with something to do with every one.
+
 Here because [`suspend`](@ref) has to put it back the way it found it, and a
 host that owns the mouse should not have to keep a second copy of the two
 strings in step with this one.
 """
-mouse_reporting(on::Bool) = on ? "\e[?1006h\e[?1002h" : "\e[?1002l\e[?1006l"
+mouse_reporting(on::Bool; motion::Bool = false) =
+    on ? string("\e[?1006h", motion ? "\e[?1003h" : "\e[?1002h") :
+         string(motion ? "\e[?1003l" : "\e[?1002l", "\e[?1006l")
 
 """
     bracketed_paste(on) -> String

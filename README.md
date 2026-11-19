@@ -79,10 +79,12 @@ and a host that already reads keys - a multiplexer that has put every
 terminal's keys into one form, a GUI, a protocol of its own - produces the codes
 itself and takes none of what follows. A host that has nothing composes these.
 
-* **`enter_terminal(in, out; altscreen, title, mouse, paste, focus)`** puts the
+* **`enter_terminal(in, out; altscreen, title, mouse, motion, paste, focus)`** puts the
   terminal in raw mode with the cursor hidden, and each of the keywords on
   where it is asked for - the alternate screen and a saved title are for a
-  host that has the whole screen, and an inline one leaves them off. It
+  host that has the whole screen, and an inline one leaves them off; `motion`
+  adds the pointer's moves with no button held to the mouse's reports, for a
+  host that shows what it rests on. It
   returns a `HeldTerminal`, which says what was done: `leave_terminal(t)`, in
   the host's own `finally`, undoes exactly that and never throws, since the
   commonest way out of a loop is a terminal that has already gone away; and

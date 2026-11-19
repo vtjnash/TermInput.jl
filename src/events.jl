@@ -41,10 +41,16 @@ end
 
 One mouse report, with [`mouse_reporting`](@ref) on.
 
-`kind` is `:press`, `:drag`, `:release`, `:wheelup` or `:wheeldown`; `x` and `y`
-are 1-based screen columns and rows, as the terminal counts them, so they index
-the frame `render` just drew - and are what `click!` takes. `mods` is a bit
-each: 1 shift, 2 alt, 4 ctrl.
+`kind` is `:press`, `:drag`, `:release`, `:wheelup` or `:wheeldown`, or `:move`
+for the pointer moving with no button held, which only motion reporting sends
+(see [`mouse_reporting`](@ref)); `x` and `y` are 1-based screen columns and
+rows, as the terminal counts them, so they index the frame `render` just drew -
+and are what `click!` takes. `mods` is a bit each: 1 shift, 2 alt, 4 ctrl.
+
+`button` is 0 for the left button, 1 the middle and 2 the right, and 128 and 129
+for the back and forward buttons many mice have beside them, numbered as the
+terminal reports them; 3 for a `:move` or a `:release` the terminal did not say
+the button of.
 """
 struct MouseEvent
     kind::Symbol
@@ -407,24 +413,28 @@ end
 # The body of an SGR mouse report (`CSI < b ; x ; y M|m`).
 #
 # The button byte packs the button in its low two bits, the modifiers above
-# them, motion at 32 and the wheel at 64 - so a wheel notch is button 64/65 and
-# a drag is the button number plus 32. `m` as the final byte means release; the
-# wheel only ever reports `M`.
+# them, motion at 32, the wheel at 64 and the extra buttons at 128 - so a wheel
+# notch is button 64/65, a drag is the button number plus 32, and the back and
+# forward buttons are 128 and 129. Motion with button 3, which is none, is the
+# pointer moving with nothing held. `m` as the final byte means release; the
+# wheel only ever reports `M`. Without the extra-button bit kept, the back
+# button read as the left one and a press on it clicked.
 function decode_mouse(body::AbstractString, pressed::Bool)
     p = split(body, ';')
     length(p) == 3 || return KeyEvent(K_NONE)
     b, x, y = tryparse(Int, p[1]), tryparse(Int, p[2]), tryparse(Int, p[3])
     (b === nothing || x === nothing || y === nothing) && return KeyEvent(K_NONE)
+    button = (b & 3) | (b & 128)
     kind = if b & 64 != 0
         (b & 3) == 0 ? :wheelup : (b & 3) == 1 ? :wheeldown : :other
     elseif !pressed
         :release
     elseif b & 32 != 0
-        :drag
+        button == 3 ? :move : :drag
     else
         :press
     end
     kind === :other && return KeyEvent(K_NONE)
     mods = ((b & 4) != 0 ? 1 : 0) | ((b & 8) != 0 ? 2 : 0) | ((b & 16) != 0 ? 4 : 0)
-    MouseEvent(kind, b & 3, x, y, mods)
+    MouseEvent(kind, button, x, y, mods)
 end
