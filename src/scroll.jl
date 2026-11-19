@@ -72,8 +72,11 @@ or `nothing` for a key that does not move it - which is then the host's.
 
 The keys are a pager's, for a list nothing is typed into: `j`/`↓` and `k`/`↑`
 a row, space, `^f` and page down - `b`, `^b` and page up - a `page` of rows,
-`g`/home the first and `G`/end the last. A list with a query at its head, a
-`Choice`, has letters spoken for and binds the arrows itself.
+`g`/home the first and `G`/end the last. A modified key is not one of them:
+a host with no meaning of its own for Shift-Down passes
+[`unmodified`](@ref)`(k)`, and one with a meaning has to see it first. A list
+with a query at its head, a `Choice`, has letters spoken for and binds the
+arrows itself.
 
 With a `Symbol`, it is the mouse: `:wheelup` and `:wheeldown` move it
 [`WHEEL_ROWS`](@ref), and any other `kind` is `nothing`. The wheel moves the

@@ -240,7 +240,7 @@ The option key `k` picks, as an index into `labels`, or 0 when it picks none:
 row - nothing where there is no such row, rather than the last.
 """
 function picked(c::Choice, k::Int)
-    k = unshift(k)
+    k = unmodified(k)
     k in (13, 10) && return selected(c)
     if c.numbered && Int('0') <= k <= Int('9')
         m = matches(c)
@@ -320,16 +320,18 @@ comes back.
 function handle!(c::Choice, k::Int)
     c.status = ""
     n = length(matches(c))
-    if c.ranged && k in (K_SUP, K_SDOWN)
+    if c.ranged && k in (K_SHIFT | K_UP, K_SHIFT | K_DOWN)
         c.anchor == 0 && (c.anchor = clamp(c.sel, 1, max(1, n)))
-        c.sel = clamp(c.sel + (k == K_SDOWN ? 1 : -1), 1, max(1, n))
+        c.sel = clamp(c.sel + (k == K_SHIFT | K_DOWN ? 1 : -1), 1, max(1, n))
         return :ok
     end
-    k = unshift(k)
-    k in (13, 10) || (c.anchor = 0)
-    if k in (K_DOWN, C_N) || (c.horizontal && k == K_RIGHT)
+    # The list's moves are the key alone; the filter has the key as it came,
+    # since Alt-Left is a word there, in a row of options as anywhere.
+    p = unmodified(k)
+    p in (13, 10) || (c.anchor = 0)
+    if p in (K_DOWN, C_N) || (c.horizontal && p == K_RIGHT && !byword(k, K_RIGHT))
         c.sel = clamp(c.sel + 1, 1, max(1, n))
-    elseif k in (K_UP, C_P) || (c.horizontal && k == K_LEFT)
+    elseif p in (K_UP, C_P) || (c.horizontal && p == K_LEFT && !byword(k, K_LEFT))
         c.sel = max(1, c.sel - 1)
     elseif !c.filter || (c.numbered && Int('0') <= k <= Int('9'))
         return :unhandled

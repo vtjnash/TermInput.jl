@@ -97,9 +97,13 @@ itself and takes none of what follows. A host that has nothing composes these.
   `KeyEvent` whose `code` is what `handle!` takes, a `PasteEvent` whose `text`
   is what `paste!` takes, a `MouseEvent` whose `kind`, `x` and `y` are what
   `click!` takes, a `SchemeEvent` or a `FocusEvent`. It reads the dialect
-  terminals speak by default: the xterm keys and their modifiers, the three
-  spellings of Alt, SGR mouse reports, bracketed paste and the focus. A
-  sequence it cannot place is
+  terminals speak by default: the xterm keys and the function keys to F20,
+  Alt on any key, SGR mouse reports, bracketed paste and the focus. A
+  modifier is a bit on the key it was held with - Ctrl-Left is
+  `K_CTRL | K_LEFT`, `⌥v` is `K_ALT | Int('v')` - and what it means is the
+  widget's: a text field takes Alt or Ctrl on an arrow as the word, and
+  every widget takes any other on a named key as the key alone
+  (`unmodified`). A sequence it cannot place is
   consumed whole and comes back as `K_NONE`, which nothing binds -
   `REPL.TerminalMenus.readkey` returns Escape and leaves the tail to arrive
   as keys, which is Shift-Tab reading as Escape-then-`Z`. It never decides
@@ -253,7 +257,7 @@ instead.
 | `^b` `^f` | backward-char, forward-char | ✅ and the arrows |
 | `^p` `^n` | previous-history, next-history | ✅ `TextArea` only, as previous-line / next-line, and so are `↑`/`↓`. A `LineInput` has no second line to reach and no history to walk, so all four come back. A `Choice` moves its cursor with them |
 | `^a` `^e` | beginning-of-line, end-of-line | ✅ and Home / End. In a `TextArea`, `^a` pressed at the front of its line goes on to the front of the text, and `^e` at the end of its line to the end of it - the Julia REPL's rule for a repeated `^a`, read off the cursor instead. Home and End stay on the line, where readline has them; the REPL sends those to the input's ends |
-| `⌥b` `⌥f` | backward-word, forward-word | ✅ and ctrl-arrows |
+| `⌥b` `⌥f` | backward-word, forward-word | ✅ and alt- or ctrl-arrows |
 | `^d` | delete-char | ✅ and Delete. Not end-of-file on an empty buffer - leaving is the host's |
 | `⌫` | backward-delete-char | ✅ |
 | `^t` | transpose-chars | ✅ |
@@ -263,7 +267,7 @@ instead.
 | `^u` | unix-line-discard | ✅ back to the start of the line - readline's rule, not zsh's kill-whole-line |
 | `^w` | unix-word-rubout | ✅ delimited by whitespace |
 | `⌥⌫` | backward-kill-word | ✅ delimited by anything non-alphanumeric, which is the whole reason it is a second key |
-| `⌥d` | kill-word | ✅ |
+| `⌥d` | kill-word | ✅ and alt- or ctrl-Delete |
 | `^y` | yank | ✅ one slot, and a *run* of kills is one yank |
 | `⌥y` | yank-pop | ⬜ skipped - the second entry of a kill ring is somebody using this as their editor. `killed` is a plain string, so a host can keep a ring and set it |
 | `^_` `^x^u` | undo | ⬜ skipped - `⌥e` opens `$EDITOR`, where undo, search and your own keymap already are. The biggest of the deliberate omissions, and the one to revisit first |

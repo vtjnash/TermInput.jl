@@ -304,14 +304,23 @@ whole readline table, including what is deliberately not here.
 # `where F`: a function only passed on, never called here, is otherwise not
 # specialised on, and the call it is passed to is dynamic after all.
 function handle!(v::TextArea, k::Int; suspend::F = f -> f()) where {F}
-    k = unshift(k)
     v.status = ""
     b = v.buf
-    if k in (K_EDIT, C_O)                           # hand it to $EDITOR
+    # The chords first - as `LineInput`'s, and `⌥e` - and then every other
+    # modifier on a named key is the key alone.
+    if k in (K_ALT | Int('e'), C_O)                 # hand it to $EDITOR
         (txt, note) = compose_external(suspend, text(b); filename = v.filename)
         settext!(b, txt)
         v.status = note
-    elseif k in (13, 10)
+    elseif k in (K_ALT | 127, K_ALT | 8)
+        deleteword!(b; alnum = true)
+    elseif k == K_ALT | Int('d') || byword(k, K_DEL)
+        killwordforward!(b)
+    elseif k == K_ALT | Int('b') || byword(k, K_LEFT)
+        move!(b, :wordleft)
+    elseif k == K_ALT | Int('f') || byword(k, K_RIGHT)
+        move!(b, :wordright)
+    elseif (k = unmodified(k)) in (13, 10)
         newline!(b)
     elseif k in (127, 8)
         backspace!(b)
@@ -321,18 +330,12 @@ function handle!(v::TextArea, k::Int; suspend::F = f -> f()) where {F}
         killline!(b)
     elseif k == C_U
         killtostart!(b)
-    elseif k in (C_W, K_WORD_BACK)
-        deleteword!(b; alnum = k == K_WORD_BACK)
-    elseif k == K_WORD_KILL
-        killwordforward!(b)
+    elseif k == C_W
+        deleteword!(b; alnum = false)
     elseif k == C_Y
         yank!(b)
     elseif k == C_T
         transpose!(b)
-    elseif k == K_WORD_LEFT
-        move!(b, :wordleft)
-    elseif k == K_WORD_RIGHT
-        move!(b, :wordright)
     elseif k in (C_A, K_HOME)
         # `^a` at the front of its line has nothing nearer to go to, and so
         # goes to the front of the text; `^e` at the end of its line likewise

@@ -569,3 +569,8 @@ function bufferrows(b::TextBuffer, w::Int)
     end
     (rows, crow, ccol)
 end
+
+# Alt or Ctrl held on `key`, whatever else is held with them: the word, on an
+# arrow or on Delete, in both text widgets - what every other program on the
+# machine does with those chords, beside readline's own `⌥b` `⌥f` `⌥d`.
+byword(k::Int, key::Int) = unmodified(k) == key && k & (K_ALT | K_CTRL) != 0

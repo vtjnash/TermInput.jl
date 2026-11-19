@@ -186,9 +186,16 @@ end
     @test K_BASE == 1 << 32
     @test !printable(K_LEFT) && !printable(K_BASE)
     for k in (K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP,
-              K_PGDN, K_STAB, K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_EDIT,
-              K_SUP, K_SDOWN)
-        @test k > 0xFFFFFFFF
+              K_PGDN, K_INS, K_F1, K_F20)
+        @test k > 0xFFFFFFFF && k & K_MODS == 0
+    end
+    # The function keys are one run, so Fn is arithmetic.
+    @test [K_F1, K_F2, K_F12, K_F13, K_F20] == K_F1 .+ [0, 1, 11, 12, 19]
+    # A modifier is a bit on the key it was held with, above every key and
+    # every character.
+    for m in (K_SHIFT, K_ALT, K_CTRL, K_META)
+        @test count_ones(m) == 1 && m > K_F20 && m & K_MODS == m
+        @test (m | K_LEFT) & ~K_MODS == K_LEFT && (m | keycode('😀')) & ~K_MODS == keycode('😀')
     end
     # `keychar` and `keycode` are inverses, over every width and over sequences
     # that are not characters at all.
@@ -204,9 +211,11 @@ end
     end
     # Shift-Up in a widget with no selection to extend is the arrow it is drawn
     # on: a key that does nothing at all reads as a terminal that has stopped
-    # responding.
-    @test unshift(K_SUP) == K_UP && unshift(K_SDOWN) == K_DOWN
-    @test unshift(Int('j')) == Int('j')
+    # responding. A character keeps its modifier, since `⌥q` is not `q`.
+    @test unmodified(K_SHIFT | K_UP) == K_UP && unmodified(K_CTRL | K_ALT | K_PGDN) == K_PGDN
+    @test unmodified(K_SHIFT | K_F3) == K_F3
+    @test unmodified(Int('j')) == Int('j') && unmodified(K_ALT | Int('q')) == K_ALT | Int('q')
+    @test unmodified(K_SHIFT | 9) == K_SHIFT | 9 && unmodified(K_NONE) == K_NONE
     # Reaching the vocabulary either way is the same constant.
     @test Keys.K_LEFT === K_LEFT && Keys.C_W === C_W
 end
@@ -267,26 +276,54 @@ end
     @test ev("\eOA") == KeyEvent(K_UP)               # application cursor mode
     @test ev("\e[5~") == KeyEvent(K_PGUP)
     @test ev("\e[6~") == KeyEvent(K_PGDN)
-    @test ev("\e[6;5~") == KeyEvent(K_PGDN)          # modified page-down
-    @test ev("\e[Z") == KeyEvent(K_STAB)             # shift-tab
-    # Alt/Meta has three spellings in the wild and all of them turn up.
-    @test ev("\eb") == KeyEvent(K_WORD_LEFT)         # Terminal.app
-    @test ev("\ef") == KeyEvent(K_WORD_RIGHT)
-    @test ev("\e\x7f") == KeyEvent(K_WORD_BACK)      # alt-backspace, everywhere
-    @test ev("\ed") == KeyEvent(K_WORD_KILL)         # alt-d, its mirror
-    @test ev("\ee") == KeyEvent(K_EDIT)              # the REPL's own key for it
-    @test ev("\e[1;3D") == KeyEvent(K_WORD_LEFT)     # CSI with a modifier
-    @test ev("\e[1;5C") == KeyEvent(K_WORD_RIGHT)    # ctrl counts as by-word too
-    @test ev("\e\e[D") == KeyEvent(K_WORD_LEFT)      # iTerm's Esc+
-    @test ev("\e[1;2D") == KeyEvent(K_LEFT)          # shift is not by-word
+    @test ev("\e[6;5~") == KeyEvent(K_CTRL | K_PGDN)  # modified page-down
+    @test ev("\e[Z") == KeyEvent(K_SHIFT | 9)         # shift-tab
+    # Alt is `ESC` and the key, any key - Terminal.app's Alt-Left is `ESC b` -
+    # or xterm's modifier, or iTerm's `ESC` before the arrow's own sequence.
+    @test ev("\eb") == KeyEvent(K_ALT | Int('b'))
+    @test ev("\ev") == KeyEvent(K_ALT | Int('v'))
+    @test ev("\eV") == KeyEvent(K_ALT | Int('V'))
+    @test ev("\e\x7f") == KeyEvent(K_ALT | 127)       # alt-backspace, everywhere
+    @test ev("\e\r") == KeyEvent(K_ALT | 13)
+    @test ev("\eé") == KeyEvent(K_ALT | keycode('é'))   # a character, whole
+    @test ev("\e\e") == KeyEvent(K_ALT | 27)
+    @test ev("\e[1;3D") == KeyEvent(K_ALT | K_LEFT)
+    @test ev("\e[1;5C") == KeyEvent(K_CTRL | K_RIGHT)
+    @test ev("\e\e[D") == KeyEvent(K_ALT | K_LEFT)
+    @test ev("\e\e[1;5D") == KeyEvent(K_ALT | K_CTRL | K_LEFT)
+    @test ev("\e[1;2D") == KeyEvent(K_SHIFT | K_LEFT)
+    @test ev("\e[1;8H") == KeyEvent(K_SHIFT | K_ALT | K_CTRL | K_HOME)
+    @test ev("\e[1;9A") == KeyEvent(K_META | K_UP)
     @test ev("\e[3~") == KeyEvent(K_DEL)
+    @test ev("\e[2~") == KeyEvent(K_INS)
+    @test ev("\e[3;3~") == KeyEvent(K_ALT | K_DEL)
+    # An Alt-Escape takes nothing of the key after it.
+    io = IOBuffer("\e\eq")
+    @test readevent(io) == KeyEvent(K_ALT | 27) && readevent(io) == KeyEvent(Int('q'))
+
+    # The function keys, in every spelling a terminal has for them.
+    @test [ev(string("\eO", c)) for c in "PQRS"] == KeyEvent.([K_F1, K_F2, K_F3, K_F4])
+    @test [ev(string("\e[1;2", c)) for c in "PQRS"] ==
+          KeyEvent.(K_SHIFT .| [K_F1, K_F2, K_F3, K_F4])
+    @test ev("\eO5P") == KeyEvent(K_CTRL | K_F1)        # xterm, once
+    @test ev("\e[P") == KeyEvent(K_F1)
+    tilde = [11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 23, 24, 25, 26, 28, 29, 31, 32, 33, 34]
+    @test [ev(string("\e[", n, "~")) for n in tilde] == KeyEvent.(K_F1 .+ (0:19))
+    @test ev("\e[15;5~") == KeyEvent(K_CTRL | K_F5)
+    @test ev("\e[16~") == ev("\e[22~") == ev("\e[35~") == KeyEvent(K_NONE)
+    # The Linux console's, whose `[` the letter after would otherwise outlast.
+    io = IOBuffer("\e[[A\e[[Eq")
+    @test readevent(io) == KeyEvent(K_F1) && readevent(io) == KeyEvent(K_F5)
+    @test readevent(io) == KeyEvent(Int('q'))
+    # A cursor position report ends in `R`, and is no F3.
+    @test ev("\e[12;40R") == KeyEvent(K_NONE)
     @test ev("\e[299~") == KeyEvent(K_NONE)          # unknown, but consumed
     @test K_NONE < 0 && !printable(K_NONE)
 
     # A sequence must not leave its tail behind to arrive as keystrokes: this
     # is Shift-Tab, which `readkey` reads as Escape-then-`Z`.
     io = IOBuffer("\e[Zq")
-    @test readevent(io) == KeyEvent(K_STAB)
+    @test readevent(io) == KeyEvent(K_SHIFT | 9)
     @test readevent(io) == KeyEvent(Int('q'))
 
     m = ev("\e[<0;40;12M")
@@ -308,11 +345,11 @@ end
     @test readevent(io) == KeyEvent(K_NONE)
     @test readevent(io) == KeyEvent(Int('q'))
     @test ev("\e[<0;40M") == KeyEvent(K_NONE)        # malformed
-    # Shift is the one modifier the vertical arrows carry a key of their own
-    # for, since it is what extends a selection. Alt and ctrl are not it.
-    @test ev("\e[1;2A") == KeyEvent(K_SUP)
-    @test ev("\e[1;2B") == KeyEvent(K_SDOWN)
-    @test ev("\e[1;5A") == KeyEvent(K_UP)
+    # Shift on a vertical arrow is the one that extends a selection, in a list
+    # that has one; every modifier comes through, for the widget to say.
+    @test ev("\e[1;2A") == KeyEvent(K_SHIFT | K_UP)
+    @test ev("\e[1;2B") == KeyEvent(K_SHIFT | K_DOWN)
+    @test ev("\e[1;5A") == KeyEvent(K_CTRL | K_UP)
 
     # An X10 report is read whole, its three bytes with it - they are any byte
     # at all, a high one among them - and the key after it is a key again. It
@@ -327,7 +364,7 @@ end
     # A report short of its bytes takes nothing of the sequence after it.
     io = IOBuffer("\e[M G\e[Zq")
     @test readevent(io) isa LegacyMouseEvent
-    @test readevent(io) == KeyEvent(K_STAB) && readevent(io) == KeyEvent(Int('q'))
+    @test readevent(io) == KeyEvent((K_SHIFT | 9)) && readevent(io) == KeyEvent(Int('q'))
     # The keypad's Enter is `ESC O M` and has no bytes behind it.
     io = IOBuffer("\eOMq")
     @test readevent(io) == KeyEvent(K_NONE) && readevent(io) == KeyEvent(Int('q'))
@@ -714,7 +751,7 @@ end
     # somebody else's composer.
     e = TextArea("t")
     @test handle!(e, C_R) === :unhandled
-    @test handle!(e, K_STAB) === :unhandled
+    @test handle!(e, (K_SHIFT | 9)) === :unhandled
     @test handle!(e, K_PGUP) === :unhandled
     @test handle!(e, keycode('y')) === :ok       # but a character is not
     # The status is a host's line, and the next keystroke clears it so that it
@@ -727,11 +764,11 @@ end
     r = TextArea("t")
     for c in "alpha beta gamma"; handle!(r, keycode(c)); end
     handle!(r, C_W);           @test text(r) == "alpha beta "
-    handle!(r, K_WORD_BACK);   @test text(r) == "alpha "
+    handle!(r, (K_ALT | 127));   @test text(r) == "alpha "
     handle!(r, C_A);           @test r.buf.col == 1
     handle!(r, C_E);           @test r.buf.col == 7
-    handle!(r, K_WORD_LEFT);   @test r.buf.col == 1
-    handle!(r, K_WORD_RIGHT);  @test r.buf.col == 6
+    handle!(r, (K_ALT | K_LEFT));   @test r.buf.col == 1
+    handle!(r, (K_ALT | K_RIGHT));  @test r.buf.col == 6
     handle!(r, C_A); handle!(r, C_D)
     @test text(r) == "lpha "
     # `^a` at the front of a line is the front of the text, and `^e` at the
@@ -748,7 +785,7 @@ end
     handle!(m, K_END);   @test (m.buf.row, m.buf.col) == (2, 4)
     handle!(m, K_END);   @test (m.buf.row, m.buf.col) == (2, 4)
     # Shift-arrows are the arrows here: there is no selection to extend.
-    handle!(r, K_SDOWN)
+    handle!(r, (K_SHIFT | K_DOWN))
     @test r.buf.row == 1
 
     # The emacs motion keys are the arrows under another name, which is what
@@ -815,7 +852,7 @@ end
     p = LineInput("where to", "a path, or nothing to stay here")
     for c in "/usr/local/lib"; handle!(p, keycode(c)); end
     @test text(p) == "/usr/local/lib"
-    handle!(p, K_WORD_BACK)                      # alt-backspace: one component
+    handle!(p, (K_ALT | 127))                      # alt-backspace: one component
     @test text(p) == "/usr/local/"
     handle!(p, C_A); @test p.buf.col == 1
     handle!(p, keycode('X'))
@@ -844,7 +881,7 @@ end
     for c in "alpha beta"; handle!(p, keycode(c)); end
     handle!(p, C_W); handle!(p, C_Y)
     @test text(p) == "alpha beta"
-    handle!(p, C_A); handle!(p, K_WORD_KILL)
+    handle!(p, C_A); handle!(p, (K_ALT | Int('d')))
     @test text(p) == " beta"
     @test handle!(p, C_G) === :unhandled
 
@@ -916,14 +953,14 @@ end
     import TermInput: chosen
     r = Choice("t", "", ["a", "b", "c", "d"]; ranged = true)
     @test chosen(r) == [1]
-    handle!(r, K_DOWN); handle!(r, K_SDOWN); handle!(r, K_SDOWN)
+    handle!(r, K_DOWN); handle!(r, (K_SHIFT | K_DOWN)); handle!(r, (K_SHIFT | K_DOWN))
     @test chosen(r) == [2, 3, 4] && selected(r) == 4
-    handle!(r, K_SUP); handle!(r, K_SUP); handle!(r, K_SUP)
+    handle!(r, (K_SHIFT | K_UP)); handle!(r, (K_SHIFT | K_UP)); handle!(r, (K_SHIFT | K_UP))
     @test chosen(r) == [1, 2]
     @test handle!(r, 13) === :unhandled && chosen(r) == [1, 2]     # ↵ keeps it
     handle!(r, K_DOWN)
     @test chosen(r) == [2]
-    handle!(n, K_SDOWN)
+    handle!(n, (K_SHIFT | K_DOWN))
     @test chosen(n) == [2]
     # A run lit from the start - the pick kept from last time - which `↵`
     # alone then takes; an unranged list has no run to light.
@@ -1042,10 +1079,10 @@ end
     # having if it cannot drift. Every key both widgets bind is written down
     # once there; this is the list of the ones where they part, so a binding
     # added to one and not the other fails here rather than in the table.
-    every = [C_B, C_F, C_P, C_N, C_A, C_E, K_WORD_LEFT, K_WORD_RIGHT, K_LEFT,
+    every = [C_B, C_F, C_P, C_N, C_A, C_E, (K_ALT | K_LEFT), (K_ALT | K_RIGHT), K_LEFT,
              K_RIGHT, K_UP, K_DOWN, K_HOME, K_END, C_D, K_DEL, 127, C_T, C_K,
-             C_U, C_W, K_WORD_BACK, K_WORD_KILL, C_Y, C_G, 27, 13, 10, C_S, C_R,
-             K_EDIT, C_O, 12, 17, 22, 0, 9, K_STAB, K_PGUP, K_PGDN]
+             C_U, C_W, (K_ALT | 127), (K_ALT | Int('d')), C_Y, C_G, 27, 13, 10, C_S, C_R,
+             (K_ALT | Int('e')), C_O, 12, 17, 22, 0, 9, (K_SHIFT | 9), K_PGUP, K_PGDN]
     act(mk, k) = handle!(mk(), k)
     ta() = TextArea("t"; initial = "ab cd")
     li() = LineInput("t"; initial = "ab cd")
@@ -1053,21 +1090,57 @@ end
 
     # A second line to reach, a line to split, and an editor worth opening.
     # Nothing else.
-    @test Set(differ) == Set([C_P, C_N, K_UP, K_DOWN, 13, 10, K_EDIT, C_O])
+    @test Set(differ) == Set([C_P, C_N, K_UP, K_DOWN, 13, 10, (K_ALT | Int('e')), C_O])
     @test act(ta, 13) === :ok && act(li, 13) === :unhandled
-    @test act(ta, K_EDIT) === :ok && act(li, K_EDIT) === :unhandled
+    @test act(ta, (K_ALT | Int('e'))) === :ok && act(li, (K_ALT | Int('e'))) === :unhandled
     @test act(ta, K_UP) === :ok && act(li, K_UP) === :unhandled
 
     # And the keys neither of them claims, which are a host's to bind. The
     # first four are how a program finishes, gives up, or does something of its
     # own - none of which a text box can answer for the program around it.
-    for k in (C_S, 27, C_G, C_R, 12, 17, 22, 0, 9, K_STAB, K_PGUP, K_PGDN)
+    for k in (C_S, 27, C_G, C_R, 12, 17, 22, 0, 9, (K_SHIFT | 9), K_PGUP, K_PGDN)
         @test act(ta, k) === :unhandled && act(li, k) === :unhandled
     end
     # Nothing returns anything but these two any more: a widget that answered
     # "submitted" or "cancelled" would be answering for its host.
     @test Set(vcat([act(ta, k) for k in every], [act(li, k) for k in every])) ⊆
           Set(ACTIONS) == Set([:ok, :unhandled])
+end
+
+@testset "a modifier is the widget's to mean something by, or the key alone" begin
+    # The word is Alt or Ctrl on an arrow or on Delete, and readline's letters.
+    for mk in (s -> TextArea("t"; initial = s), s -> LineInput("t"; initial = s))
+        for k in (K_ALT | K_LEFT, K_CTRL | K_LEFT, K_ALT | K_CTRL | K_LEFT, K_ALT | Int('b'))
+            r = mk("alpha beta"); handle!(r, k)
+            @test r.buf.col == 7
+        end
+        for k in (K_CTRL | K_DEL, K_ALT | K_DEL, K_ALT | Int('d'))
+            r = mk("alpha beta"); handle!(r, C_A); handle!(r, k)
+            @test text(r) == " beta"
+        end
+        r = mk("a/b"); handle!(r, K_ALT | 8)
+        @test text(r) == "a/"
+        # Every other modifier on a named key is the key: a Shift-Left that did
+        # nothing would be a field that had stopped answering.
+        r = mk("ab"); handle!(r, K_SHIFT | K_LEFT); handle!(r, K_META | K_HOME)
+        @test r.buf.col == 1
+        handle!(r, K_CTRL | K_END); @test r.buf.col == 3
+        # And a modified character is not the character: nothing is typed.
+        r = mk("ab")
+        @test handle!(r, K_ALT | Int('v')) === :unhandled && text(r) == "ab"
+        @test handle!(r, K_F1) === :unhandled && handle!(r, K_SHIFT | K_F1) === :unhandled
+    end
+    # A list takes the modifiers off its moves; its filter has the key as it
+    # came, so Alt-Left there is the word and not the next option.
+    c = Choice("t", "", ["one", "two", "three"]; horizontal = true)
+    handle!(c, K_CTRL | K_DOWN); @test c.sel == 2
+    handle!(c, K_SHIFT | K_RIGHT); @test c.sel == 3
+    for ch in "ab cd"; handle!(c, Int(ch)); end
+    handle!(c, K_ALT | K_LEFT)
+    @test c.input.buf.col == 4
+    @test listmove(K_SHIFT | K_DOWN, 1, 50, 10) === nothing
+    @test listmove(unmodified(K_CTRL | K_PGDN), 1, 50, 10) == 11
+    @test listmove(unmodified(K_ALT | Int('j')), 1, 50, 10) === nothing
 end
 
 @testset "the box comes from CHROME" begin
@@ -1236,7 +1309,7 @@ end
     @test displaysize(t) == displaysize(out)
     write(t, "x")
     @test endswith(String(take!(out)), "x")
-    @test readevent(t) == KeyEvent(K_STAB) && readevent(t) == KeyEvent(Int('q'))
+    @test readevent(t) == KeyEvent((K_SHIFT | 9)) && readevent(t) == KeyEvent(Int('q'))
 
     # `suspend` undoes and redoes what was done and no more: no alternate
     # screen that was never entered, and the mouse as it is now.
@@ -1282,7 +1355,7 @@ end
     # Armed, one event, and then parked again.
     write(p.in, "\e[Zq")
     arm!(r)
-    @test take!(events) == KeyEvent(K_STAB)
+    @test take!(events) == KeyEvent((K_SHIFT | 9))
     sleep(0.05)
     @test !isready(events)
     arm!(r)
@@ -1434,7 +1507,7 @@ end
     counted(f) = (calls[] += 1; f())
     v = TextArea("t"; initial = "before")
     aseditor("terminput_test_editor") do
-        @test handle!(v, K_EDIT; suspend = counted) === :ok
+        @test handle!(v, (K_ALT | Int('e')); suspend = counted) === :ok
     end
     @test text(v) == "edited\nby somebody else\n"
     @test (v.buf.row, v.buf.col) == (3, 1)   # the cursor is at the end of it
@@ -1453,7 +1526,7 @@ end
     # the status says what happened rather than the buffer silently emptying.
     e = TextArea("t"; initial = "keep this")
     aseditor("no-such-editor-anywhere-9f3a") do
-        @test handle!(e, K_EDIT) === :ok
+        @test handle!(e, (K_ALT | Int('e'))) === :ok
     end
     @test text(e) == "keep this"
     @test !isempty(e.status)
@@ -1469,13 +1542,13 @@ end
     end
     m = TextArea("t"; initial = "merge", filename = "MERGE_MSG")
     aseditor("terminput_naming_editor") do
-        handle!(m, K_EDIT)
+        handle!(m, (K_ALT | Int('e')))
     end
     @test basename(seen[]) == "MERGE_MSG"
     @test !ispath(dirname(seen[]))           # its directory went with it
     u = TextArea("t"; initial = "comment")
     aseditor("terminput_naming_editor") do
-        handle!(u, K_EDIT)
+        handle!(u, (K_ALT | Int('e')))
     end
     @test basename(seen[]) == "message" && !ispath(dirname(seen[]))
 
@@ -1487,7 +1560,7 @@ end
     end
     n = TextArea("t"; initial = "unchanged")
     aseditor("terminput_null_editor") do
-        handle!(n, K_EDIT)
+        handle!(n, (K_ALT | Int('e')))
     end
     @test text(n) == "unchanged"
     @test occursin("no change", n.status)
@@ -1993,7 +2066,7 @@ end
     TermInput.select!(c, 2)
     @test selected(c) == 2 && query(c) == ""
     r = Choice("x", "", ["a", "b", "c"]; ranged = true)
-    handle!(r, K_SDOWN)
+    handle!(r, (K_SHIFT | K_DOWN))
     @test TermInput.chosen(r) == [1, 2]
     TermInput.select!(r, 3)
     @test TermInput.chosen(r) == [3]

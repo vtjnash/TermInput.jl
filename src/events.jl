@@ -220,10 +220,11 @@ What it reads is the dialect terminals speak by default, and xterm's:
 
   * a byte, or a UTF-8 sequence carried as the bytes it was - see
     [`K_BASE`](@ref) - never decoded, so nothing is thrown away
-  * `CSI` and `SS3` keys - the arrows, Home, End, Page Up and Down, Delete,
-    Shift-Tab - with xterm's modifiers: alt or ctrl on a horizontal arrow is
-    the word, and shift on a vertical one is [`K_SUP`](@ref)/[`K_SDOWN`](@ref)
-  * the three spellings of Alt that are all in use - see below
+  * `CSI` and `SS3` keys - the arrows, Home, End, Page Up and Down, Insert,
+    Delete, Shift-Tab and the function keys ([`K_F1`](@ref) on) - each with
+    xterm's modifiers as its bits ([`K_SHIFT`](@ref))
+  * Alt on any key, as `ESC` and the key, and on an arrow as `ESC` and the
+    arrow's own sequence, as well as xterm's modifier
   * SGR mouse reports ([`MouseEvent`](@ref)), bracketed pastes
     ([`PasteEvent`](@ref)), the scheme and background reports
     ([`SchemeEvent`](@ref)) and the focus reports ([`FocusEvent`](@ref))
@@ -241,28 +242,7 @@ at all - writes its own and keeps the widgets.
 """
 function readevent(io::IO)
     b = read(io, UInt8)
-    if b >= 0x80
-        # Whatever arrived, carried as the bytes it was. Assembling the sequence
-        # here - rather than handing each byte on separately - is what keeps
-        # every widget dealing in characters: left as bytes, an accented letter
-        # inserted three separate nothings. But it is assembled and not
-        # *decoded*, because a codepoint cannot hold what a terminal can send:
-        # see `K_BASE`.
-        #
-        # The framing is Julia's, so a sequence stored in a buffer is read back
-        # out of it as the same one `Char`. `0xF8` and above lead nothing, a
-        # continuation byte with no lead is itself, and a sequence whose
-        # continuation never came is its lead byte alone - which is why the next
-        # byte is looked at and not taken.
-        n = b >= 0xf8 ? 0 : b >= 0xf0 ? 3 : b >= 0xe0 ? 2 : b >= 0xc0 ? 1 : 0
-        k = Int(b)
-        for _ in 1:n
-            eof(io) && break
-            (peek(io, UInt8) & 0xc0) == 0x80 || break
-            k = (k << 8) | Int(read(io, UInt8))
-        end
-        return KeyEvent(k)
-    end
+    b >= 0x80 && return KeyEvent(charkey(io, b))
     b == 0x1b || return KeyEvent(Int(b))
     # A bare 27 is Escape; 27 with bytes behind it heads a sequence.
     bytesavailable(io) == 0 && return KeyEvent(27)
@@ -270,37 +250,45 @@ function readevent(io::IO)
     # `ESC ]` heads an OSC, as `ESC [` heads a CSI, and is read to its end
     # whenever it arrives: the answer to `BG_QUERY` comes when the terminal
     # sends it, and the part of it not yet here would otherwise be keys. Alt-]
-    # is spent on that.
+    # is spent on that, and Alt-[ and Alt-O on the CSI and SS3 they head.
     a == UInt8(']') && return read_osc(io)
-    if a != UInt8('[') && a != UInt8('O')
-        # ESC-prefixed: the terminal is sending Meta/Alt as "escape, then the
-        # key". Which of the three spellings below arrives depends on the
-        # terminal and its settings, and they are all in use - Terminal.app
-        # sends `ESC b` for Alt-Left, iTerm in Esc+ mode sends `ESC ESC [ D`,
-        # and everything sends `ESC DEL` for Alt-Backspace.
-        a == 0x7f && return KeyEvent(K_WORD_BACK)
-        a == UInt8('b') && return KeyEvent(K_WORD_LEFT)
-        a == UInt8('f') && return KeyEvent(K_WORD_RIGHT)
-        # `ESC d` is kill-word, the mirror of alt-backspace. The text widgets
-        # bind both, and the difference between them is the whole reason
-        # readline has two.
-        a == UInt8('d') && return KeyEvent(K_WORD_KILL)
-        # The REPL binds `\ee` to edit_input - the same move `K_EDIT` makes, so
-        # the same key.
-        a == UInt8('e') && return KeyEvent(K_EDIT)
-        if a == 0x1b && bytesavailable(io) > 0
-            # `ESC ESC [ D`: the second ESC opens the arrow's own sequence, so
-            # it is the head of a CSI and not a byte to step over.
-            c = read(io, UInt8)
-            if c == UInt8('[') || c == UInt8('O')
-                ev = read_csi(io, c == UInt8('['))
-                ev isa KeyEvent && ev.code == K_LEFT && return KeyEvent(K_WORD_LEFT)
-                ev isa KeyEvent && ev.code == K_RIGHT && return KeyEvent(K_WORD_RIGHT)
-            end
+    (a == UInt8('[') || a == UInt8('O')) && return read_csi(io, a == UInt8('['))
+    # ESC-prefixed: the terminal is sending Alt as "escape, then the key" - any
+    # key, `ESC DEL` for Alt-Backspace among them.
+    if a == 0x1b
+        # `ESC ESC [ D`, iTerm's Alt-Left in Esc+ mode: the second ESC opens the
+        # key's own sequence, so it is the head of a CSI and not a byte to step
+        # over - and is looked at, not taken, so that Alt-Escape is not the
+        # key after it as well.
+        if bytesavailable(io) > 0 && peek(io, UInt8) in (UInt8('['), UInt8('O'))
+            ev = read_csi(io, read(io, UInt8) == UInt8('['))
+            return ev isa KeyEvent && ev.code != K_NONE ? KeyEvent(ev.code | K_ALT) : ev
         end
-        return KeyEvent(K_NONE)
+        return KeyEvent(K_ALT | 27)
     end
-    read_csi(io, a == UInt8('['))
+    KeyEvent(K_ALT | (a >= 0x80 ? charkey(io, a) : Int(a)))
+end
+
+# A key that is not one byte, its lead byte `b` already read: whatever arrived,
+# carried as the bytes it was. Assembling the sequence here - rather than
+# handing each byte on separately - is what keeps every widget dealing in
+# characters: left as bytes, an accented letter inserted three separate
+# nothings. But it is assembled and not *decoded*, because a codepoint cannot
+# hold what a terminal can send: see `K_BASE`.
+#
+# The framing is Julia's, so a sequence stored in a buffer is read back out of
+# it as the same one `Char`. `0xF8` and above lead nothing, a continuation byte
+# with no lead is itself, and a sequence whose continuation never came is its
+# lead byte alone - which is why the next byte is looked at and not taken.
+function charkey(io::IO, b::UInt8)
+    n = b >= 0xf8 ? 0 : b >= 0xf0 ? 3 : b >= 0xe0 ? 2 : b >= 0xc0 ? 1 : 0
+    k = Int(b)
+    for _ in 1:n
+        eof(io) && break
+        (peek(io, UInt8) & 0xc0) == 0x80 || break
+        k = (k << 8) | Int(read(io, UInt8))
+    end
+    k
 end
 
 # The body of an OSC, with its `ESC ]` already read, to `BEL` or `ST`: the
@@ -347,8 +335,19 @@ function read_csi(io::IO, csi::Bool = true)
         fin == UInt8('M') && return read_x10(io)
         fin == UInt8('I') && return FocusEvent(true)
         fin == UInt8('O') && return FocusEvent(false)
+        # The Linux console's F1 to F5, `CSI [ A` to `E`: the `[` is a final
+        # byte by the rule, and the letter after it would otherwise be a key.
+        if fin == UInt8('[')
+            eof(io) && return KeyEvent(K_NONE)
+            c = read(io, UInt8)
+            return KeyEvent(UInt8('A') <= c <= UInt8('E') ? K_F1 + Int(c - UInt8('A')) : K_NONE)
+        end
     end
-    decode_csi(String(params), Char(fin))
+    # An SS3 key's modifier, where one is sent, is its one parameter: `ESC O 2 P`
+    # is how xterm once spelled Shift-F1, and how some still do.
+    p = String(params)
+    !csi && !isempty(p) && all(isdigit, p) && (p = string("1;", p))
+    decode_csi(p, Char(fin))
 end
 
 # The three bytes after an X10 report's `CSI M`, read and thrown away. Each is
@@ -380,35 +379,52 @@ end
 function decode_csi(params::String, fin::Char)
     startswith(params, "<") && (fin == 'M' || fin == 'm') &&
         return decode_mouse(params[2:end], fin == 'M')
-    # `CSI 1;3D` is Alt-Left: the second parameter carries the modifiers, as
-    # 1 + shift + 2·alt + 4·ctrl. Either alt or ctrl on an arrow means the word,
-    # which is what both of them do everywhere else.
-    parts = split(params, ';')
-    mod = length(parts) >= 2 ? something(tryparse(Int, String(parts[2])), 1) : 1
-    byword = (mod - 1) & 0x06 != 0
-    # Shift is the one modifier the vertical arrows carry a meaning for, and it
-    # is the same one it has in every list anybody has ever selected in.
-    shifted = (mod - 1) & 0x01 != 0
-    fin == 'A' && return KeyEvent(shifted ? K_SUP : K_UP)
-    fin == 'B' && return KeyEvent(shifted ? K_SDOWN : K_DOWN)
-    fin == 'C' && return KeyEvent(byword ? K_WORD_RIGHT : K_RIGHT)
-    fin == 'D' && return KeyEvent(byword ? K_WORD_LEFT : K_LEFT)
-    fin == 'H' && return KeyEvent(K_HOME)
-    fin == 'F' && return KeyEvent(K_END)
-    fin == 'Z' && return KeyEvent(K_STAB)
     fin == 'n' && params in ("?997;1", "?997;2") && return SchemeEvent(params[end] == '1', UInt8[])
-    if fin == '~'
-        # `CSI 5 ~` and `CSI 5 ; 2 ~` are the same key, modified.
-        n = tryparse(Int, String(first(split(params, ';'))))
-        n == 1 && return KeyEvent(K_HOME)
-        n == 3 && return KeyEvent(K_DEL)
-        n == 4 && return KeyEvent(K_END)
-        n == 5 && return KeyEvent(K_PGUP)
-        n == 6 && return KeyEvent(K_PGDN)
-        n == 7 && return KeyEvent(K_HOME)
-        n == 8 && return KeyEvent(K_END)
+    # `CSI 1;3D` is Alt-Left: the second parameter carries the modifiers, as
+    # 1 + shift + 2·alt + 4·ctrl + 8·meta, each kept as its bit on the key.
+    # What one means on a key is the widget's - Alt or Ctrl on an arrow is the
+    # word in a text field, Shift on Up or Down extends a selection in a list.
+    parts = split(params, ';')
+    mods = length(parts) >= 2 ? modbits(something(tryparse(Int, parts[2]), 1)) : 0
+    key = if fin in ('P', 'Q', 'R', 'S')
+        # F1 to F4, numbered by nothing but the final byte. A first parameter
+        # other than 1 is no key but a cursor position report, `CSI 12;40R`.
+        parts[1] in ("", "1") ? K_F1 + (fin - 'P') : K_NONE
+    else
+        fin == 'A' ? K_UP : fin == 'B' ? K_DOWN : fin == 'C' ? K_RIGHT :
+        fin == 'D' ? K_LEFT : fin == 'H' ? K_HOME : fin == 'F' ? K_END :
+        fin == 'Z' ? K_SHIFT | 9 :
+        fin == '~' ? tildekey(something(tryparse(Int, parts[1]), 0)) : K_NONE
     end
-    KeyEvent(K_NONE)
+    key == K_NONE && return KeyEvent(K_NONE)
+    KeyEvent(key | mods)
+end
+
+# xterm's modifier parameter as the key's bits; anything past meta - kitty's
+# super and hyper - is not one a key here carries.
+function modbits(m::Int)
+    m -= 1
+    m < 0 && return 0
+    (m & 1 != 0 ? K_SHIFT : 0) | (m & 2 != 0 ? K_ALT : 0) |
+        (m & 4 != 0 ? K_CTRL : 0) | (m & 8 != 0 ? K_META : 0)
+end
+
+# The `CSI n ~` keys, by VT220's numbering: Home and End twice over, since
+# terminals disagree on which of the two pairs they are, and the function keys
+# from F1 with the gaps VT220 left at 16, 22, 27 and 30.
+function tildekey(n::Int)
+    n in (1, 7) && return K_HOME
+    n in (4, 8) && return K_END
+    n == 2 && return K_INS
+    n == 3 && return K_DEL
+    n == 5 && return K_PGUP
+    n == 6 && return K_PGDN
+    11 <= n <= 15 && return K_F1 + (n - 11)
+    17 <= n <= 21 && return K_F6 + (n - 17)
+    23 <= n <= 26 && return K_F11 + (n - 23)
+    n in (28, 29) && return K_F15 + (n - 28)
+    31 <= n <= 34 && return K_F17 + (n - 31)
+    K_NONE
 end
 
 # The body of an SGR mouse report (`CSI < b ; x ; y M|m`).

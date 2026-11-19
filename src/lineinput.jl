@@ -135,29 +135,32 @@ here for them to walk either, which is what readline gives them, so all of them
 are handed back for a host that has somewhere to go.
 """
 function handle!(v::LineInput, k::Int)
-    k = unshift(k)
     v.status = ""
     b = v.buf
-    if k in (127, 8)
+    # The word's chords first, and then every other modifier on a named key
+    # is the key alone.
+    if k in (K_ALT | 127, K_ALT | 8)
+        deleteword!(b; alnum = true)
+    elseif k == K_ALT | Int('d') || byword(k, K_DEL)
+        killwordforward!(b)
+    elseif k == K_ALT | Int('b') || byword(k, K_LEFT)
+        move!(b, :wordleft)
+    elseif k == K_ALT | Int('f') || byword(k, K_RIGHT)
+        move!(b, :wordright)
+    elseif (k = unmodified(k)) in (127, 8)
         backspace!(b)
     elseif k in (K_DEL, C_D)
         deletechar!(b)
     elseif k == C_U
         killtostart!(b)
-    elseif k in (C_W, K_WORD_BACK)
-        deleteword!(b; alnum = k == K_WORD_BACK)
-    elseif k == K_WORD_KILL
-        killwordforward!(b)
+    elseif k == C_W
+        deleteword!(b; alnum = false)
     elseif k == C_K
         killline!(b)
     elseif k == C_Y
         yank!(b)
     elseif k == C_T
         transpose!(b)
-    elseif k == K_WORD_LEFT
-        move!(b, :wordleft)
-    elseif k == K_WORD_RIGHT
-        move!(b, :wordright)
     elseif k in (C_A, K_HOME)
         move!(b, :home)
     elseif k in (C_E, K_END)

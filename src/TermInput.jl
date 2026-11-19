@@ -98,8 +98,10 @@ export enter_terminal, leave_terminal, InputReader, arm!, EndEvent, frame_bytes,
 # lives.
 export Keys
 export K_BASE, K_LEFT, K_RIGHT, K_UP, K_DOWN, K_DEL, K_HOME, K_END, K_PGUP,
-       K_PGDN, K_STAB, K_WORD_LEFT, K_WORD_RIGHT, K_WORD_BACK, K_WORD_KILL,
-       K_EDIT, K_SUP, K_SDOWN, K_NONE, printable, keychar, keycode, unshift
+       K_PGDN, K_INS, K_NONE, printable, keychar, keycode, unmodified
+export K_SHIFT, K_ALT, K_CTRL, K_META, K_MODS
+export K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10, K_F11, K_F12,
+       K_F13, K_F14, K_F15, K_F16, K_F17, K_F18, K_F19, K_F20
 export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
        C_W, C_Y
 
