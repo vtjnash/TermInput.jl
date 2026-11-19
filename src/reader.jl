@@ -63,22 +63,36 @@ is `InputReader{T}` and the task is compiled for what it was given.
     end
     arm!(r, forwarding)
 
-`close(r)` lets it go: a reader that is parked ends there, and one that is
-reading ends when its read does, and puts nothing more on `events` either way.
+Made from a `HeldTerminal`, it notes the terminal's answers to the fence - a
+[`FenceEvent`](@ref) is read, noted on the terminal, and the read goes on for
+the event it was armed for - so the host never sees one.
+
+`close(r)` lets it go: a reader that is parked ends there, and puts nothing
+more on `events`. One that is reading cannot be stopped in its read, and would
+otherwise take whatever is typed next - at the prompt the program returns to.
+Made from a `HeldTerminal` entered with `fence`, `close` asks the terminal for
+a cut, and the reader reads up to it, dropping what came before, and ends
+there; `close` waits for that, as [`leave_terminal`](@ref) does, so that when it
+returns nothing is reading. Otherwise, or if the answer does not come in
+[`FENCE_PATIENCE`](@ref), the reader ends when its read does. Either way it
+puts nothing more on `events`.
 """
 mutable struct InputReader{T}
     ready::Channel{T}            # host -> reader: read one event, with this
     task::Union{Nothing,Task}
     closed::Bool
+    reading::Bool                # in its read, and not to be stopped there
+    term::Union{Nothing,HeldTerminal}
 end
 
-function InputReader(read, in::IO, events::Channel, ::Type{T}) where {T}
-    r = InputReader{T}(Channel{T}(1), nothing, false)
+function InputReader(read, in::IO, events::Channel, ::Type{T},
+                     term::Union{Nothing,HeldTerminal} = nothing) where {T}
+    r = InputReader{T}(Channel{T}(1), nothing, false, false, term)
     r.task = @async readloop(r, read, in, events)
     r
 end
 InputReader(read, t::HeldTerminal, events::Channel, ::Type{T}) where {T} =
-    InputReader(read, t.in, events, T)
+    InputReader(read, t.in, events, T, t)
 InputReader(in, events::Channel) = InputReader(readkeys, in, events, Nothing)
 
 readkeys(io::IO, ::Nothing) = readevent(io)
@@ -86,28 +100,50 @@ readkeys(io::IO, ::Nothing) = readevent(io)
 # The task's body, and a function so that it is compiled for the read, the
 # stream and the channel it was handed, which nothing outside it ever sees.
 function readloop(r::InputReader, read, in::IO, events::Channel)
+    t = r.term
     while true
         arg = try
             take!(r.ready)
         catch
             break                           # closed: nobody wants more
         end
-        ev = try
-            read(in, arg)
-        catch e
-            # EOF because the terminal closed, EIO because the pty is gone.
-            # The loop is waiting on its channel and nothing else is coming,
-            # so it is told - unless it has already let go.
-            r.closed || try
-                put!(events, EndEvent(e))
-            catch
-            end
-            break
-        end
+        # Closed while the arming sat in the channel: nothing has been read.
         r.closed && break
-        try
-            put!(events, ev)
-        catch
+        # Until an event for the host, or the cut after a close. Nothing yields
+        # between the test of `closed` and the read, so a `close` on this
+        # thread sees `reading` as it is.
+        while true
+            r.reading = true
+            ev = try
+                read(in, arg)
+            catch e
+                # EOF because the terminal closed, EIO because the pty is gone.
+                # The loop is waiting on its channel and nothing else is coming,
+                # so it is told - unless it has already let go.
+                r.reading = false
+                r.closed || try
+                    put!(events, EndEvent(e))
+                catch
+                end
+                return
+            end
+            r.reading = false
+            if ev isa FenceEvent && t !== nothing
+                answered!(t)
+                r.closed && t.fences == 0 && return     # the cut: the rest is not ours
+                continue                                # not the host's: read on
+            end
+            if r.closed
+                # Read past a close: what comes before the cut is dropped, and
+                # the reading goes on to it while there is one to come.
+                t !== nothing && t.fences > 0 && continue
+                return
+            end
+            try
+                put!(events, ev)
+            catch
+                return
+            end
             break
         end
     end
@@ -127,5 +163,20 @@ arm!(r::InputReader{T}, arg::T) where {T} = (put!(r.ready, arg); r)
 function Base.close(r::InputReader)
     r.closed = true
     isopen(r.ready) && close(r.ready)
+    t = r.term
+    if r.reading && t !== nothing && t.fence
+        # In its read: give it a cut to stop at. The question asked on the way
+        # in, while it is unanswered, is one already.
+        t.answered && try
+            ask!(t)
+        catch
+        end
+        task = r.task::Task
+        if t.fences > 0
+            timedwait(() -> istaskdone(task), max(fence_deadline(t, time()) - time(), 0.0);
+                      pollint = 0.005)
+            istaskdone(task) || gave_up!(t)
+        end
+    end
     nothing
 end

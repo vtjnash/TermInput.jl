@@ -16,7 +16,8 @@ import TermInput: settext!, curline, move!, newline!, insertblock!, paste!,
     backspace!, deletechar!, killline!, killtostart!, deleteword!, killwordforward!,
     kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
-    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT, FOCUS_REPORT, HeldTerminal
+    DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT, FOCUS_REPORT, HeldTerminal,
+    FENCE_QUERY, FENCE_PATIENCE
 import TermInput: Row, verbatim, linked, overlaid, rowhead, rowtail, rowlines, rowwraplines
 import InteractiveUtils
 import StyledStrings: Face, SimpleColor
@@ -1406,6 +1407,88 @@ end
     @test take!(events) == KeyEvent(Int('j'))
     arm!(u)
     @test take!(events) isa EndEvent                  # an IOBuffer ends too
+end
+
+@testset "what the terminal sent before raw mode went is read up to a fence" begin
+    # The answer to `CSI c` is an event of its own; DA2's is nothing.
+    @test readevent(IOBuffer("\e[?62;22c")) == FenceEvent("62;22")
+    @test readevent(IOBuffer("\e[>1;10;0c")) == KeyEvent(K_NONE)
+
+    fenced(in, out = IOBuffer(); answered = true) = begin
+        t = HeldTerminal(in, out)
+        t.fence, t.answered, t.mouse = true, answered, true
+        answered || (t.fences = 1; t.asked = time())
+        t
+    end
+
+    # Leaving asks after the mouse goes off, and reads to the answer: the
+    # report in flight is gone, and what was typed after it is the prompt's.
+    in, out = IOBuffer("\e[<35;1;1M\e[?62;22cx"), IOBuffer()
+    t = fenced(in, out)
+    leave_terminal(t)
+    s = String(take!(out))
+    @test occursin(string(mouse_reporting(false), FENCE_QUERY), s)
+    @test t.fences == 0 && read(in, Char) == 'x'
+
+    # `suspend` reads to it before the child has the terminal.
+    in = IOBuffer("\e[<35;1;1M\e[?62cy")
+    t = fenced(in)
+    suspend(() -> (@test read(in, Char) == 'y'), t)
+
+    # The answer to the question asked on the way in is waited for, however
+    # late, and the wait ends when it comes and not before.
+    p = Pipe()
+    Base.link_pipe!(p; reader_supports_async = true, writer_supports_async = true)
+    t = fenced(p.out; answered = false)
+    @async (sleep(0.3); write(p.in, "\e[<35;2;2M\e[?1;2ck"))
+    took = @elapsed leave_terminal(t)
+    @test 0.25 < took < FENCE_PATIENCE && t.answered && t.fences == 0
+    @test read(p.out, UInt8) == UInt8('k')
+    close(p.in)
+
+    # One that has not answered by its patience is never waited for again,
+    # and leaves as it always did.
+    out = IOBuffer()
+    t = fenced(IOBuffer(), out; answered = false)
+    t.asked = time() - FENCE_PATIENCE
+    @test @elapsed(leave_terminal(t)) < 0.5
+    @test !t.fence && !occursin(FENCE_QUERY, String(take!(out)))
+
+    # The answer is the terminal's: reading from the held terminal notes it
+    # and goes on to the next event.
+    t = fenced(IOBuffer("\e[?62cq"); answered = false)
+    @test readevent(t) == KeyEvent(Int('q')) && t.answered && t.fences == 0
+
+    # Only a tty is asked, and only one whose answers would come back here.
+    out = IOBuffer()
+    t = enter_terminal(IOBuffer(), out; fence = true)
+    @test !t.fence && !occursin(FENCE_QUERY, String(take!(out)))
+
+    # A reader made from the terminal notes the answer and reads on for the
+    # event it was armed for; the host never sees it.
+    p = Pipe()
+    Base.link_pipe!(p; reader_supports_async = true, writer_supports_async = true)
+    out = IOBuffer()
+    t = fenced(p.out, out; answered = false)
+    events = Channel{Any}(8)
+    r = InputReader(t, events)
+    arm!(r)
+    write(p.in, "\e[?62c")
+    sleep(0.05)
+    write(p.in, "j")
+    @test take!(events) == KeyEvent(Int('j')) && t.answered && t.fences == 0
+    # Closed in its read, it is given a cut and reads to it: the report before
+    # is dropped, the key after is for whoever reads next, and when `close`
+    # returns nothing is reading.
+    arm!(r)
+    sleep(0.05)
+    @test r.reading
+    @async (sleep(0.1); write(p.in, "\e[<35;3;3M\e[?62cz"))
+    close(r)
+    @test istaskdone(r.task) && !isready(events)
+    @test endswith(String(take!(out)), FENCE_QUERY)
+    @test read(p.out, UInt8) == UInt8('z')
+    close(p.in)
 end
 
 @testset "a frame is one write, cursor hidden first and shown last" begin

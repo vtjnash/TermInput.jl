@@ -51,6 +51,8 @@ embeds one.
   * `suspend.jl`   handing the terminal to `\$EDITOR` and taking it back
   * `terminal.jl`  `enter_terminal` and `leave_terminal`: the modes a loop
                    needs, set and undone
+  * `fence.jl`     a cut in the input, asked of the terminal, so that what it
+                   sent before raw mode went is read before it does
   * `reader.jl`    `InputReader`: a task reading one event each time it is
                    armed, onto a channel the host's loop waits on
   * `frame.jl`     `frame_bytes`, a frame as one write, and `input_waiting`,
@@ -89,7 +91,7 @@ export TextArea, LineInput, Choice, Confirm, submission, isblank, picked, answer
        listwindow, listmove, TEXTAREA_HINT, LINEINPUT_HINT, CHOICE_HINT, CONFIRM_HINT
 export markdown_rows
 export KeyEvent, PasteEvent, MouseEvent, SchemeEvent, FocusEvent, LegacyMouseEvent,
-       readevent, scheme_reports
+       FenceEvent, readevent, scheme_reports
 export enter_terminal, leave_terminal, InputReader, arm!, EndEvent, frame_bytes,
        input_waiting
 # The key vocabulary is `readevent`'s or a host's to produce and every widget's
@@ -119,7 +121,8 @@ export C_A, C_B, C_D, C_E, C_F, C_G, C_K, C_N, C_O, C_P, C_R, C_S, C_T, C_U,
         wordstart, wordend, boxstyle, Box, BoxLine, BOXES, dialogbox, centred, CHROME,
         DIALOG_WIDTH, MDRow, MarkdownStyle, highlight, codemime,
         highlighted_lines,
-        BG_QUERY, SCHEME_REPORT, BG_REPORT, FOCUS_REPORT, HeldTerminal,
+        BG_QUERY, SCHEME_REPORT, BG_REPORT, FOCUS_REPORT, FENCE_QUERY, FENCE_PATIENCE,
+        HeldTerminal,
         Row, row, rowhead, rowtail, rowlines, rowwraplines, rowrstrip, rowvpad, overlaid,
         linked, verbatim, wrapspans, tablerows"""))
 end
@@ -133,6 +136,7 @@ include("buffer.jl")
 include("border.jl")
 include("suspend.jl")
 include("terminal.jl")
+include("fence.jl")
 include("reader.jl")
 include("frame.jl")
 include("scroll.jl")

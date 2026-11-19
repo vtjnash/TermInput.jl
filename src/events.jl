@@ -97,6 +97,26 @@ end
 SchemeEvent(dark::Bool, rest::Vector{UInt8}) = SchemeEvent(dark, "", rest)
 
 """
+    FenceEvent(attrs)
+
+The terminal's answer to [`FENCE_QUERY`](@ref) - device attributes, `CSI ? 62 ;
+22 c` - with `attrs` what came between the `?` and the `c`. Nobody types it, and
+it is not news: what matters is when it comes. A terminal answers in the order
+it is asked and after everything it sent before, so the answer is a cut in the
+input - every report the terminal sent before it has been read once it has
+been, and whatever follows was sent after. That is what
+[`leave_terminal`](@ref) and [`suspend`](@ref) wait for, on a terminal entered
+with `fence`, before raw mode goes: see [`HeldTerminal`](@ref).
+
+`readevent(t::HeldTerminal)` and an [`InputReader`](@ref) made from one take it
+themselves and note it on the terminal; a host only sees one when it reads the
+stream directly.
+"""
+struct FenceEvent
+    attrs::String
+end
+
+"""
     FocusEvent(focused, rest)
 
 The terminal gained the focus (`CSI I`, `focused`) or lost it (`CSI O`). Sent
@@ -174,6 +194,16 @@ Asks for the terminal's background colour: `OSC 11 ?`. The answer is a
 const BG_QUERY = "\e]11;?\e\\"
 
 """
+    FENCE_QUERY
+
+Asks for the terminal's primary device attributes: `CSI c`. Asked for the
+answer's place in the input and not for what it says - see
+[`FenceEvent`](@ref) - and this one because it is the question every terminal
+answers: the VT100 did, and a multiplexer answers it itself.
+"""
+const FENCE_QUERY = "\e[c"
+
+"""
     scheme_reports(on) -> String
 
 The sequences that ask for [`SchemeEvent`](@ref)s - dark or light now, again
@@ -205,7 +235,7 @@ const BG_REPORT = r"\e\]11;([\x21-\x7e]{1,100})(?:\a|\e\\)"
 
 """
     readevent(io) -> KeyEvent | PasteEvent | MouseEvent | SchemeEvent | FocusEvent |
-                     LegacyMouseEvent
+                     LegacyMouseEvent | FenceEvent
 
 Read one input event from a terminal in raw mode. Blocks for the first byte,
 and - once `ESC [` or `ESC ]` has been seen and a sequence is therefore
@@ -230,6 +260,8 @@ What it reads is the dialect terminals speak by default, and xterm's:
     ([`SchemeEvent`](@ref)) and the focus reports ([`FocusEvent`](@ref))
   * an X10 mouse report, read whole so its three bytes are not keys, as the
     sign that the encoding asked for was lost ([`LegacyMouseEvent`](@ref))
+  * the answer to the device attributes query ([`FenceEvent`](@ref)), which
+    is only asked of a terminal entered with `fence`
 
 A bare Escape is told from the head of a sequence by whether anything is
 already waiting behind it: a terminal writes a sequence in one write, and a
@@ -380,6 +412,9 @@ function decode_csi(params::String, fin::Char)
     startswith(params, "<") && (fin == 'M' || fin == 'm') &&
         return decode_mouse(params[2:end], fin == 'M')
     fin == 'n' && params in ("?997;1", "?997;2") && return SchemeEvent(params[end] == '1', UInt8[])
+    # The primary device attributes; DA2's `CSI > … c`, which some editors ask
+    # for and leave behind them, is no key and no cut.
+    fin == 'c' && startswith(params, "?") && return FenceEvent(params[2:end])
     # `CSI 1;3D` is Alt-Left: the second parameter carries the modifiers, as
     # 1 + shift + 2·alt + 4·ctrl + 8·meta, each kept as its bit on the key.
     # What one means on a key is the widget's - Alt or Ctrl on an arrow is the
