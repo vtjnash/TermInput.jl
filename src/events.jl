@@ -110,11 +110,18 @@ with `fence`, before raw mode goes: see [`HeldTerminal`](@ref).
 
 `readevent(t::HeldTerminal)` and an [`InputReader`](@ref) made from one take it
 themselves and note it on the terminal; a host only sees one when it reads the
-stream directly.
+stream directly - or with `rest`.
+
+`rest` is as [`FocusEvent`](@ref)'s: always empty from [`readevent`](@ref), and
+for a host that reads some of its input undecoded and takes the answer out with
+[`fence_in`](@ref), what the read held besides. An `InputReader` hands it on
+only when that is not empty, for the host to pass on as it would the read.
 """
 struct FenceEvent
     attrs::String
+    rest::Vector{UInt8}
 end
+FenceEvent(attrs::AbstractString) = FenceEvent(String(attrs), UInt8[])
 
 """
     FocusEvent(focused, rest)
@@ -202,6 +209,15 @@ answer's place in the input and not for what it says - see
 answers: the VT100 did, and a multiplexer answers it itself.
 """
 const FENCE_QUERY = "\e[c"
+
+"""
+    FENCE_REPORT
+
+The answer to [`FENCE_QUERY`](@ref) - `CSI ? 62 ; 22 c` - as a `Regex` whose one
+capture is the attributes. For a host that reads undecoded; [`fence_in`](@ref)
+is the use of it that knows whether an answer is being waited for.
+"""
+const FENCE_REPORT = r"\e\[\?([0-9;]{0,32})c"
 
 """
     scheme_reports(on) -> String

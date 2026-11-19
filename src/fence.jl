@@ -96,3 +96,27 @@ function wait_input(io::IO, secs::Float64)
     end
     timedwait(() -> istaskdone(waiter), secs; pollint = 0.005) === :ok && bytesavailable(io) > 0
 end
+
+"""
+    fence_in(t::HeldTerminal, bytes) -> Union{Nothing, FenceEvent}
+
+The first answer to the fence in a raw read, taken out: a [`FenceEvent`](@ref)
+whose `rest` is what the read held besides, in order - or `nothing` when the
+read has none, or when no answer is being waited for. For a host that reads
+some of its input undecoded, to pass on to a program it runs, from the read
+it gives an [`InputReader`](@ref): the reader notes the answer, takes out any
+more there are while more are waited for, and hands on the rest.
+
+Only while one is waited for, because then it is ours: a program the input is
+passed on to may ask the terminal the same question, and its answer, when
+nothing here asked, is its own.
+"""
+function fence_in(t::HeldTerminal, bytes::AbstractVector{UInt8})
+    t.fences > 0 || return nothing
+    s = String(copy(bytes))
+    m = match(FENCE_REPORT, s)
+    m === nothing && return nothing
+    i = m.offset
+    j = i + ncodeunits(m.match)
+    FenceEvent(String(something(m[1])), vcat(bytes[1:i-1], bytes[j:end]))
+end

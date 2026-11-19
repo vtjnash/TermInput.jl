@@ -17,7 +17,7 @@ import TermInput: settext!, curline, move!, newline!, insertblock!, paste!,
     kill!, yank!, transpose!, wordstart, wordend, bufferrows, boxstyle, dialogbox,
     centred, CHROME, ACTIONS, click!, query, query!, selected, matches, doubled,
     DOUBLECLICK, oneline, column, BOXES, Box, BoxLine, BG_QUERY, SCHEME_REPORT, BG_REPORT, FOCUS_REPORT, HeldTerminal,
-    FENCE_QUERY, FENCE_PATIENCE
+    FENCE_QUERY, FENCE_REPORT, FENCE_PATIENCE, fence_in
 import TermInput: Row, verbatim, linked, overlaid, rowhead, rowtail, rowlines, rowwraplines
 import InteractiveUtils
 import StyledStrings: Face, SimpleColor
@@ -1411,7 +1411,8 @@ end
 
 @testset "what the terminal sent before raw mode went is read up to a fence" begin
     # The answer to `CSI c` is an event of its own; DA2's is nothing.
-    @test readevent(IOBuffer("\e[?62;22c")) == FenceEvent("62;22")
+    ev = readevent(IOBuffer("\e[?62;22c"))
+    @test ev isa FenceEvent && ev.attrs == "62;22" && isempty(ev.rest)
     @test readevent(IOBuffer("\e[>1;10;0c")) == KeyEvent(K_NONE)
 
     fenced(in, out = IOBuffer(); answered = true) = begin
@@ -1488,6 +1489,35 @@ end
     @test istaskdone(r.task) && !isready(events)
     @test endswith(String(take!(out)), FENCE_QUERY)
     @test read(p.out, UInt8) == UInt8('z')
+    close(p.in)
+
+    # Undecoded, the answer is taken out only while one is waited for: a
+    # program the input goes on to may ask the same, and its answer is its own.
+    t = fenced(IOBuffer(); answered = false)
+    f = fence_in(t, Vector{UInt8}("a\e[?62;22cb"))
+    @test f isa FenceEvent && f.attrs == "62;22" && f.rest == Vector{UInt8}("ab")
+    t.fences = 0
+    @test fence_in(t, Vector{UInt8}("a\e[?62cb")) === nothing
+    @test occursin(FENCE_REPORT, "\e[?1;2c") && !occursin(FENCE_REPORT, "\e[>1;2c")
+
+    # A reader whose read is undecoded: the answer noted, the read's rest
+    # handed on - and an answer alone is nothing for the host.
+    p = Pipe()
+    Base.link_pipe!(p; reader_supports_async = true, writer_supports_async = true)
+    t = fenced(p.out; answered = false)
+    r = InputReader(t, events, Nothing) do io, _
+        bytes = readavailable(io)
+        something(fence_in(t, bytes), bytes)
+    end
+    write(p.in, "\e[?62c")
+    arm!(r)
+    sleep(0.1)
+    @test t.answered && t.fences == 0 && !isready(events)
+    t.fences = 2                    # two out, answered in one read
+    write(p.in, "x\e[?62c\e[?62cy")
+    ev = take!(events)
+    @test ev isa FenceEvent && ev.rest == Vector{UInt8}("xy") && t.fences == 0
+    close(r)
     close(p.in)
 end
 

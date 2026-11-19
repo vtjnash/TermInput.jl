@@ -65,7 +65,9 @@ is `InputReader{T}` and the task is compiled for what it was given.
 
 Made from a `HeldTerminal`, it notes the terminal's answers to the fence - a
 [`FenceEvent`](@ref) is read, noted on the terminal, and the read goes on for
-the event it was armed for - so the host never sees one.
+the event it was armed for - so the host never sees one. A read of the host's
+own that is undecoded finds the answer with [`fence_in`](@ref) and returns that;
+the reader notes it, and hands the event on only for its `rest`.
 
 `close(r)` lets it go: a reader that is parked ends there, and puts nothing
 more on `events`. One that is reading cannot be stopped in its read, and would
@@ -130,8 +132,18 @@ function readloop(r::InputReader, read, in::IO, events::Channel)
             r.reading = false
             if ev isa FenceEvent && t !== nothing
                 answered!(t)
+                # A raw read can hold the answers to two questions at once:
+                # the one asked on the way in, and a close's.
+                rest = ev.rest
+                while !isempty(rest)
+                    f = fence_in(t, rest)
+                    f === nothing && break
+                    answered!(t)
+                    rest = f.rest
+                end
                 r.closed && t.fences == 0 && return     # the cut: the rest is not ours
-                continue                                # not the host's: read on
+                (r.closed || isempty(rest)) && continue # not the host's: read on
+                ev = FenceEvent(ev.attrs, rest)         # what else the read held is
             end
             if r.closed
                 # Read past a close: what comes before the cut is dropped, and
